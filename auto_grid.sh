@@ -310,7 +310,7 @@ GH=$((USABLE_GAME_H / ROWS))
 log_status "Mode Grid: ${MODE_NAME} ${ROWS}x${COLS} (${COUNT} Aplikasi)"
 
 # ==============================================================================
-# FASE 1: BUKA SETIAP APLIKASI ➔ UBAH KE FREEFORM ➔ GESER KE KUADRAN MASING-MASING
+# FASE 1: BUKA SETIAP APLIKASI ➔ UBAH KE FREEFORM ➔ RESIZE KE KUADRAN MASING-MASING
 # ==============================================================================
 idx=0
 for PKG in $SELECTED_PACKAGES; do
@@ -323,7 +323,7 @@ for PKG in $SELECTED_PACKAGES; do
     R=$(((col == COLS - 1) ? SW : (L + GW)))
     B=$(((row == ROWS - 1) ? SH : (T + GH)))
 
-    printf "${GREEN}[%d/%d]${NC} Memproses Mode Freeform -> %s (Grid #%d: %d,%d -> %d,%d)\n" "$((idx+1))" "$COUNT" "$PKG" "$((idx+1))" "$L" "$T" "$R" "$B"
+    printf "${GREEN}[%d/%d]${NC} Memproses Freeform -> %s (Grid #%d: %d,%d -> %d,%d)\n" "$((idx+1))" "$COUNT" "$PKG" "$((idx+1))" "$L" "$T" "$R" "$B"
     
     PREF_DIR="/data/data/$PKG/shared_prefs"
     PREF="$PREF_DIR/${PKG}_preferences.xml"
@@ -341,17 +341,23 @@ for PKG in $SELECTED_PACKAGES; do
     log_status "Menunggu 8 detik agar aplikasi terbuka..."
     sleep "$LAUNCH_DELAY"
 
-    # Sentuh Recent ➔ Sentuh Logo (640, 96) ➔ Sentuh Freeform (928, 236) ➔ Langsung Kunci Grid
+    # Sentuh Recent ➔ Sentuh Logo (640, 96) ➔ Sentuh Freeform (928, 236) ➔ Resize ke Kuadran Grid
     do_manual_recents_freeform "$PKG" "$L" "$T" "$R" "$B"
 
     idx=$((idx+1))
 done
 
 # ==============================================================================
-# FASE 2: PENGUNCIAN POSISI AKHIR SELURUH JENDELA GRID
+# FASE 2: TEKAN TOMBOL HOME 1X
 # ==============================================================================
-log_status "Memastikan dan mengunci posisi seluruh jendela Grid 2x2..."
-sleep 1
+log_status "Semua aplikasi sudah Freeform. Menekan tombol Home 1x..."
+input keyevent 3 >/dev/null 2>&1
+sleep 2
+
+# ==============================================================================
+# FASE 3: BUKA KEMBALI SETIAP APLIKASI DARI NOMOR 1 YANG SUDAH DI-RESIZE
+# ==============================================================================
+log_status "Membuka kembali masing-masing aplikasi mulai dari nomor 1..."
 
 idx=0
 for PKG in $SELECTED_PACKAGES; do
@@ -364,6 +370,14 @@ for PKG in $SELECTED_PACKAGES; do
     R=$(((col == COLS - 1) ? SW : (L + GW)))
     B=$(((row == ROWS - 1) ? SH : (T + GH)))
 
+    printf "${GREEN}[%d/%d]${NC} Membuka Jendela Grid #%d -> %s\n" "$((idx+1))" "$COUNT" "$((idx+1))" "$PKG"
+
+    # Buka Aplikasi (langsung muncul dalam mode Freeform di posisi Grid)
+    am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" >/dev/null 2>&1
+    monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+    sleep 2
+
+    # Kunci ukuran & fokuskan ke depan
     TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${PKG}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
     if [ -z "$TASK_ID" ]; then
         TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 5 "$PKG" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
@@ -376,7 +390,7 @@ for PKG in $SELECTED_PACKAGES; do
         cmd activity focus-task "$TASK_ID" >/dev/null 2>&1
         am stack movetofront "$TASK_ID" >/dev/null 2>&1
     fi
-    sleep 0.5
+
     idx=$((idx+1))
 done
 
