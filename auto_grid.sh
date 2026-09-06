@@ -68,6 +68,85 @@ clean_and_inject_window_keys() {
     fi
 }
 
+trigger_freeform_via_recents() {
+    pkg_name="$1"
+    
+    # 1. Buka Recent Apps (KEYCODE_APP_SWITCH = 187)
+    input keyevent 187 >/dev/null 2>&1
+    sleep 1.5
+
+    DUMP_FILE="/sdcard/recents_dump.xml"
+    rm -f "$DUMP_FILE" >/dev/null 2>&1
+
+    # 2. Dump UI Recent Apps
+    if command -v uiautomator >/dev/null 2>&1; then
+        uiautomator dump "$DUMP_FILE" >/dev/null 2>&1
+    fi
+
+    FREEFORM_LINE=""
+    if [ -f "$DUMP_FILE" ]; then
+        FREEFORM_LINE=$(grep -iE 'text="Freeform"|content-desc="Freeform"' "$DUMP_FILE" 2>/dev/null | head -n 1)
+    fi
+
+    # Jika menu popup (App info | Split screen | Freeform) belum terbuka
+    if [ -z "$FREEFORM_LINE" ]; then
+        RAW_SIZE=""
+        if command -v wm >/dev/null 2>&1; then
+            RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
+        fi
+        [ -z "$RAW_SIZE" ] && RAW_SIZE="1280x720"
+        
+        SW_W=$(echo "$RAW_SIZE" | cut -d'x' -f1)
+        SW_H=$(echo "$RAW_SIZE" | cut -d'x' -f2)
+        
+        # Tap pada ikon kartu aplikasi di bagian atas tengah (X=50%, Y=22%)
+        TAP_X=$((SW_W / 2))
+        TAP_Y=$((SW_H * 22 / 100))
+        input tap $TAP_X $TAP_Y >/dev/null 2>&1
+        sleep 1
+
+        # Dump ulang UI setelah menu popup terbuka
+        if command -v uiautomator >/dev/null 2>&1; then
+            uiautomator dump "$DUMP_FILE" >/dev/null 2>&1
+            if [ -f "$DUMP_FILE" ]; then
+                FREEFORM_LINE=$(grep -iE 'text="Freeform"|content-desc="Freeform"' "$DUMP_FILE" 2>/dev/null | head -n 1)
+            fi
+        fi
+    fi
+
+    # Jika tombol "Freeform" berhasil terdeteksi via XML UI Dump
+    if [ -n "$FREEFORM_LINE" ]; then
+        BOUNDS=$(echo "$FREEFORM_LINE" | grep -oE 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | head -n 1)
+        if [ -n "$BOUNDS" ]; then
+            X1=$(echo "$BOUNDS" | grep -oE '[0-9]+' | sed -n '1p')
+            Y1=$(echo "$BOUNDS" | grep -oE '[0-9]+' | sed -n '2p')
+            X2=$(echo "$BOUNDS" | grep -oE '[0-9]+' | sed -n '3p')
+            Y2=$(echo "$BOUNDS" | grep -oE '[0-9]+' | sed -n '4p')
+            
+            CENTER_X=$(( (X1 + X2) / 2 ))
+            CENTER_Y=$(( (Y1 + Y2) / 2 ))
+            
+            input tap $CENTER_X $CENTER_Y >/dev/null 2>&1
+            sleep 1
+            return 0
+        fi
+    fi
+
+    # Fallback jika uiautomator tidak didukung: Tap posisi tombol "Freeform" (kanan popup menu)
+    RAW_SIZE=""
+    if command -v wm >/dev/null 2>&1; then
+        RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
+    fi
+    [ -z "$RAW_SIZE" ] && RAW_SIZE="1280x720"
+    SW_W=$(echo "$RAW_SIZE" | cut -d'x' -f1)
+    SW_H=$(echo "$RAW_SIZE" | cut -d'x' -f2)
+
+    FB_X=$((SW_W * 78 / 100))
+    FB_Y=$((SW_H * 28 / 100))
+    input tap $FB_X $FB_Y >/dev/null 2>&1
+    sleep 1
+}
+
 read_input_safe() {
     prompt_msg="$1"
     [ -n "$prompt_msg" ] && printf "%b" "$prompt_msg" >&2
@@ -279,9 +358,9 @@ GH=$((USABLE_GAME_H / ROWS))
 log_status "Mode Grid: ${MODE_NAME} ${ROWS}x${COLS} (${COUNT} Aplikasi)"
 
 # ==============================================================================
-# FASE 1: MEMBUKA SELURUH APLIKASI 1-4 & MENGUBAH KE MODE FREEFORM
+# FASE 1: MEMBUKA APLIKASI 1-4 & KLIK TOMBOL "FREEFORM" DI RECENT APPS OTOMATIS
 # ==============================================================================
-log_status "FASE 1: Membuka Aplikasi 1-4 & Mengubah Semuanya ke Mode Freeform..."
+log_status "FASE 1: Membuka Aplikasi 1-4 & Menekan Tombol 'Freeform' di Recent Apps..."
 
 idx=0
 for PKG in $SELECTED_PACKAGES; do
@@ -297,7 +376,7 @@ for PKG in $SELECTED_PACKAGES; do
     R=$(((col == COLS - 1) ? SW : (L + GW)))
     B=$(((row == ROWS - 1) ? SH : (T + GH)))
 
-    printf "${GREEN}[1/2 - %d/%d]${NC} Buka & Set Freeform -> %s\n" "$((idx+1))" "$COUNT" "$PKG"
+    printf "${GREEN}[1/2 - %d/%d]${NC} Buka & Otomatis Klik Freeform -> %s\n" "$((idx+1))" "$COUNT" "$PKG"
     
     am force-stop "$PKG" >/dev/null 2>&1
     
@@ -309,28 +388,13 @@ for PKG in $SELECTED_PACKAGES; do
 
     clean_and_inject_window_keys "$PREF" "$L" "$T" "$R" "$B" "/data/data/$PKG"
 
-    # Launch aplikasi (Langkah 1-4 manual)
+    # Launch aplikasi
     am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" >/dev/null 2>&1
     monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
     sleep 2
 
-    # Deteksi Task ID
-    TASK_ID=""
-    if command -v dumpsys >/dev/null 2>&1; then
-        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 3 "$PKG" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
-        if [ -z "$TASK_ID" ]; then
-            TASK_ID=$(dumpsys activity activities 2>/dev/null | grep -B 5 "$PKG" | grep -oE 'Task\{[a-f0-9]+ #[0-9]+' | grep -oE '[0-9]+$' | head -n 1)
-        fi
-    fi
-
-    # Set Windowing Mode ke Freeform (5) & Resize Bounds
-    if [ -n "$TASK_ID" ]; then
-        cmd activity set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
-        am stack set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
-        am task set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
-        cmd activity resize-task "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
-        am task resize "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
-    fi
+    # Triggers Recent Apps & Klik tombol "Freeform" otomatis seperti manual
+    trigger_freeform_via_recents "$PKG"
 
     idx=$((idx+1))
 done
@@ -348,19 +412,9 @@ idx=0
 for PKG in $SELECTED_PACKAGES; do
     printf "${GREEN}[2/2 - %d/%d]${NC} Membuka Kembali (Pencet Ulang) -> %s\n" "$((idx+1))" "$COUNT" "$PKG"
     
-    TASK_ID=""
-    if command -v dumpsys >/dev/null 2>&1; then
-        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 3 "$PKG" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
-    fi
-
     # Mencet ulang aplikasi 1,2,3,4 yang sudah di-freeform
     am start --windowingMode 5 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" >/dev/null 2>&1
     monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-    
-    if [ -n "$TASK_ID" ]; then
-        cmd activity focus-task "$TASK_ID" >/dev/null 2>&1
-        am stack movetofront "$TASK_ID" >/dev/null 2>&1
-    fi
     
     sleep 1
     idx=$((idx+1))
