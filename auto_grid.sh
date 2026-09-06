@@ -6,8 +6,8 @@
 #              (Menu Manual Interaktif: Pilihan Aplikasi & Orientasi H/V)
 # ==============================================================================
 
-STATUS_BAR_HEIGHT=20
-HEADER_HEIGHT=36
+STATUS_BAR_HEIGHT=
+HEADER_HEIGHT=5
 LAUNCH_DELAY=10
 
 EXCLUDED_PREFIXES="android com.android. com.google.android. com.qualcomm. com.mediatek. com.sec.android. com.xiaomi. com.huawei. org.chromium."
