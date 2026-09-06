@@ -27,35 +27,39 @@ clean_and_inject_window_keys() {
     fi
 
     pref_dir=$(dirname "$xml_file")
+    mkdir -p "$pref_dir" >/dev/null 2>&1
     chmod 777 "$pref_dir" >/dev/null 2>&1
 
     chattr -i "$xml_file" >/dev/null 2>&1
-    chmod 666 "$xml_file" >/dev/null 2>&1
 
-    sed -i '/name="app_cloner_.*window/d' "$xml_file" >/dev/null 2>&1
-    sed -i '/name="app_cloner_.*freeform/d' "$xml_file" >/dev/null 2>&1
-    sed -i '/name="app_cloner_.*floating/d' "$xml_file" >/dev/null 2>&1
+    existing_content=""
+    if [ -f "$xml_file" ]; then
+        chmod 666 "$xml_file" >/dev/null 2>&1
+        existing_content=$(grep -v '</map>' "$xml_file" 2>/dev/null | grep -v 'name="app_cloner_' | grep -v '<?xml' | grep -v '<map')
+    fi
 
-    prefixes="app_cloner_current_window app_cloner_initial_window app_cloner_window app_cloner_default_window app_cloner_last_window app_cloner_saved_window app_cloner_freeform_window"
-    
-    xml_block=""
-    xml_block="${xml_block}  <boolean name=\"app_cloner_freeform_window\" value=\"true\" \/>\n"
-    xml_block="${xml_block}  <boolean name=\"app_cloner_floating_window\" value=\"true\" \/>\n"
-    xml_block="${xml_block}  <boolean name=\"app_cloner_enable_freeform_window\" value=\"true\" \/>\n"
-    xml_block="${xml_block}  <boolean name=\"app_cloner_enable_floating_window\" value=\"true\" \/>\n"
-    xml_block="${xml_block}  <boolean name=\"app_cloner_display_in_floating_window\" value=\"true\" \/>\n"
-    xml_block="${xml_block}  <boolean name=\"app_cloner_save_window_position\" value=\"true\" \/>\n"
-    xml_block="${xml_block}  <boolean name=\"app_cloner_remember_window_position\" value=\"true\" \/>\n"
-    xml_block="${xml_block}  <boolean name=\"app_cloner_restore_window_position\" value=\"true\" \/>\n"
-
-    for prefix in $prefixes; do
-        xml_block="${xml_block}  <int name=\"${prefix}_left\" value=\"${left}\" \/>\n"
-        xml_block="${xml_block}  <int name=\"${prefix}_top\" value=\"${top}\" \/>\n"
-        xml_block="${xml_block}  <int name=\"${prefix}_right\" value=\"${right}\" \/>\n"
-        xml_block="${xml_block}  <int name=\"${prefix}_bottom\" value=\"${bottom}\" \/>\n"
-    done
-
-    sed -i "s|<\/map>|${xml_block}<\/map>|g" "$xml_file" >/dev/null 2>&1
+    {
+        echo '<?xml version="1.0" encoding="utf-8" standalone="yes"?>'
+        echo '<map>'
+        [ -n "$existing_content" ] && echo "$existing_content"
+        
+        echo '  <boolean name="app_cloner_freeform_window" value="true" />'
+        echo '  <boolean name="app_cloner_floating_window" value="true" />'
+        echo '  <boolean name="app_cloner_enable_freeform_window" value="true" />'
+        echo '  <boolean name="app_cloner_enable_floating_window" value="true" />'
+        echo '  <boolean name="app_cloner_display_in_floating_window" value="true" />'
+        echo '  <boolean name="app_cloner_save_window_position" value="true" />'
+        echo '  <boolean name="app_cloner_remember_window_position" value="true" />'
+        echo '  <boolean name="app_cloner_restore_window_position" value="true" />'
+        
+        for prefix in app_cloner_current_window app_cloner_initial_window app_cloner_window app_cloner_default_window app_cloner_last_window app_cloner_saved_window app_cloner_freeform_window; do
+            echo "  <int name=\"${prefix}_left\" value=\"${left}\" />"
+            echo "  <int name=\"${prefix}_top\" value=\"${top}\" />"
+            echo "  <int name=\"${prefix}_right\" value=\"${right}\" />"
+            echo "  <int name=\"${prefix}_bottom\" value=\"${bottom}\" />"
+        done
+        echo '</map>'
+    } > "$xml_file"
 
     chmod 666 "$xml_file" >/dev/null 2>&1
     chmod 777 "$pref_dir" >/dev/null 2>&1
@@ -85,22 +89,22 @@ get_task_id_safe() {
     _pkg="$1"
     _tid=""
     
-    # 1. dumpsys activity recents (ringan & cepat) dengan batas waktu 2 detik
-    _tid=$(timeout 2 dumpsys activity recents 2>/dev/null | grep -E "A=[0-9]+:${_pkg}|${_pkg}" | grep -oE '#[0-9]+' | tr -d '#' | head -n 1)
+    # 1. Ekstrak Task ID dari Task{... #ID ...} pada dumpsys activity recents
+    _tid=$(timeout 2 dumpsys activity recents 2>/dev/null | grep "$_pkg" | grep -oE 'Task\{[^}]*#[0-9]+' | grep -oE '#[0-9]+' | tr -d '#' | head -n 1)
     
-    # 2. taskId=xxx di recents
+    # 2. Coba baris affinity / realActivity di recents
     if [ -z "$_tid" ]; then
-        _tid=$(timeout 2 dumpsys activity recents 2>/dev/null | grep -B 4 "$_pkg" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
+        _tid=$(timeout 2 dumpsys activity recents 2>/dev/null | grep -B 2 "$_pkg" | grep -oE 'Task\{[^}]*#[0-9]+' | grep -oE '#[0-9]+' | tr -d '#' | head -n 1)
     fi
     
-    # 3. dumpsys window windows
+    # 3. dumpsys activity activities
     if [ -z "$_tid" ]; then
-        _tid=$(timeout 2 dumpsys window windows 2>/dev/null | grep -E "Window\{.*${_pkg}" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
+        _tid=$(timeout 2 dumpsys activity activities 2>/dev/null | grep "$_pkg" | grep -oE 'Task\{[^}]*#[0-9]+' | grep -oE '#[0-9]+' | tr -d '#' | head -n 1)
     fi
 
-    # 4. Fallback dumpsys activity tasks dengan timeout 2 detik
+    # 4. Fallback id=xxx
     if [ -z "$_tid" ]; then
-        _tid=$(timeout 2 dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${_pkg}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
+        _tid=$(timeout 2 dumpsys activity recents 2>/dev/null | grep -B 2 "$_pkg" | grep -oE 'id=[0-9]+' | head -n 1 | cut -d'=' -f2)
     fi
     
     echo "$_tid"
@@ -114,6 +118,9 @@ resize_task_safe() {
     _b="$5"
     
     [ -z "$_tid" ] && return 1
+    [ "$_tid" = "0" ] && return 1
+
+    log_status "Menerapkan ukuran Grid ke Task #${_tid}: (${_l},${_t} -> ${_r},${_b})"
 
     cmd activity set-windowing-mode "$_tid" 5 >/dev/null 2>&1
     am task resize "$_tid" "${_l},${_t},${_r},${_b}" >/dev/null 2>&1
@@ -396,6 +403,11 @@ for PKG in $SELECTED_PACKAGES; do
 
     printf "${GREEN}[%d/%d]${NC} Membuka Jendela Grid #%d -> %s\n" "$((idx+1))" "$COUNT" "$((idx+1))" "$PKG"
 
+    # Injeksi ulang koordinat ke SharedPreferences agar sinkron
+    PREF_DIR="/data/data/$PKG/shared_prefs"
+    PREF="$PREF_DIR/${PKG}_preferences.xml"
+    clean_and_inject_window_keys "$PREF" "$L" "$T" "$R" "$B" "/data/data/$PKG"
+
     # Buka Aplikasi (langsung muncul dalam mode Freeform di posisi Grid)
     am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" >/dev/null 2>&1
     monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
@@ -403,8 +415,11 @@ for PKG in $SELECTED_PACKAGES; do
 
     # Ambil Task ID secara aman (anti-freeze) dan kunci ukuran grid
     TASK_ID=$(get_task_id_safe "$PKG")
-    if [ -n "$TASK_ID" ]; then
+    if [ -n "$TASK_ID" ] && [ "$TASK_ID" != "0" ]; then
         resize_task_safe "$TASK_ID" "$L" "$T" "$R" "$B"
+    else
+        log_status "Menerapkan resize bounds langsung ke task aktif..."
+        am task resize "$PKG" "${L},${T},${R},${B}" >/dev/null 2>&1
     fi
 
     idx=$((idx+1))
