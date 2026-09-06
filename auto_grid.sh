@@ -6,6 +6,13 @@ LAUNCH_DELAY=3
 
 EXCLUDED_PREFIXES="android com.android. com.google.android. com.qualcomm. com.mediatek. com.sec.android. com.xiaomi. com.huawei. org.chromium."
 
+# Pastikan setting sistem Freeform aktif di Android OS
+settings put global enable_freeform_support 1 >/dev/null 2>&1
+settings put global force_resizable_activities 1 >/dev/null 2>&1
+settings put global freeform_window_management 1 >/dev/null 2>&1
+setprop persist.sys.debug.freeform_window 1 >/dev/null 2>&1
+setprop persist.sys.debug.force_resizable 1 >/dev/null 2>&1
+
 clean_and_inject_window_keys() {
     xml_file="$1"
     left="$2"
@@ -26,11 +33,25 @@ clean_and_inject_window_keys() {
     chattr -i "$xml_file" >/dev/null 2>&1
     chmod 666 "$xml_file" >/dev/null 2>&1
 
-    sed -i '/name="app_cloner_.*window_/d' "$xml_file" >/dev/null 2>&1
+    # Hapus kunci posisi dan kunci boolean freeform lama
+    sed -i '/name="app_cloner_.*window/d' "$xml_file" >/dev/null 2>&1
+    sed -i '/name="app_cloner_.*freeform/d' "$xml_file" >/dev/null 2>&1
+    sed -i '/name="app_cloner_.*floating/d' "$xml_file" >/dev/null 2>&1
 
     prefixes="app_cloner_current_window app_cloner_initial_window app_cloner_window app_cloner_default_window app_cloner_last_window app_cloner_saved_window app_cloner_freeform_window"
     
     xml_block=""
+    # 1. Injeksi Kunci Boolean Aktifkan Freeform / Floating Window Mode
+    xml_block="${xml_block}  <boolean name=\"app_cloner_freeform_window\" value=\"true\" \/>\n"
+    xml_block="${xml_block}  <boolean name=\"app_cloner_floating_window\" value=\"true\" \/>\n"
+    xml_block="${xml_block}  <boolean name=\"app_cloner_enable_freeform_window\" value=\"true\" \/>\n"
+    xml_block="${xml_block}  <boolean name=\"app_cloner_enable_floating_window\" value=\"true\" \/>\n"
+    xml_block="${xml_block}  <boolean name=\"app_cloner_display_in_floating_window\" value=\"true\" \/>\n"
+    xml_block="${xml_block}  <boolean name=\"app_cloner_save_window_position\" value=\"true\" \/>\n"
+    xml_block="${xml_block}  <boolean name=\"app_cloner_remember_window_position\" value=\"true\" \/>\n"
+    xml_block="${xml_block}  <boolean name=\"app_cloner_restore_window_position\" value=\"true\" \/>\n"
+
+    # 2. Injeksi Kunci Koordinat Grid Jendela (left, top, right, bottom)
     for prefix in $prefixes; do
         xml_block="${xml_block}  <int name=\"${prefix}_left\" value=\"${left}\" \/>\n"
         xml_block="${xml_block}  <int name=\"${prefix}_top\" value=\"${top}\" \/>\n"
@@ -49,6 +70,10 @@ clean_and_inject_window_keys() {
 
 launch_app() {
     pkg_name="$1"
+    left="$2"
+    top="$3"
+    right="$4"
+    bottom="$5"
     
     # 1. Buka aplikasi via am start launcher intent
     am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$pkg_name" >/dev/null 2>&1
@@ -64,11 +89,15 @@ launch_app() {
         fi
     fi
 
-    # 3. Ubah ke mode Freeform dan bawa ke Foreground Focus
+    # 3. Ubah ke mode Freeform (5) & Resize Task Bounds langsung di OS WindowManager Android 12
     if [ -n "$TASK_ID" ]; then
         cmd activity set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
         am stack set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
         am task set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
+
+        # Resize Task Bounds ke ukuran (left, top, right, bottom)
+        cmd activity resize-task "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
+        am task resize "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
         
         cmd activity focus-task "$TASK_ID" >/dev/null 2>&1
         am stack movetofront "$TASK_ID" >/dev/null 2>&1
@@ -315,7 +344,7 @@ for PKG in $SELECTED_PACKAGES; do
     clean_and_inject_window_keys "$PREF" "$L" "$T" "$R" "$B" "/data/data/$PKG"
 
     sleep 1
-    launch_app "$PKG"
+    launch_app "$PKG" "$L" "$T" "$R" "$B"
 
     log_status "Jeda ${LAUNCH_DELAY} detik..."
     sleep "$LAUNCH_DELAY"
