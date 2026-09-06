@@ -65,12 +65,6 @@ clean_and_inject_window_keys() {
 }
 
 do_manual_recents_freeform() {
-    pkg_name="$1"
-    left="$2"
-    top="$3"
-    right="$4"
-    bottom="$5"
-
     # 1. Buka Recent Apps (KEYCODE_APP_SWITCH = 187)
     log_status "1. Menekan Recent Apps..."
     input keyevent 187 >/dev/null 2>&1
@@ -85,18 +79,48 @@ do_manual_recents_freeform() {
     log_status "3. Menekan tombol Freeform (X: 928, Y: 236)..."
     input tap 928 236 >/dev/null 2>&1
     sleep 2
+}
 
-    # 4. Langsung posisikan dan kunci jendela ini di kuadran gridnya
-    TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${pkg_name}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
-    if [ -z "$TASK_ID" ]; then
-        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 5 "$pkg_name" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
+get_task_id_safe() {
+    _pkg="$1"
+    _tid=""
+    
+    # 1. dumpsys activity recents (ringan & cepat) dengan batas waktu 2 detik
+    _tid=$(timeout 2 dumpsys activity recents 2>/dev/null | grep -E "A=[0-9]+:${_pkg}|${_pkg}" | grep -oE '#[0-9]+' | tr -d '#' | head -n 1)
+    
+    # 2. taskId=xxx di recents
+    if [ -z "$_tid" ]; then
+        _tid=$(timeout 2 dumpsys activity recents 2>/dev/null | grep -B 4 "$_pkg" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
+    fi
+    
+    # 3. dumpsys window windows
+    if [ -z "$_tid" ]; then
+        _tid=$(timeout 2 dumpsys window windows 2>/dev/null | grep -E "Window\{.*${_pkg}" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
     fi
 
-    if [ -n "$TASK_ID" ]; then
-        cmd activity set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
-        cmd activity resize-task "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
-        am task resize "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
+    # 4. Fallback dumpsys activity tasks dengan timeout 2 detik
+    if [ -z "$_tid" ]; then
+        _tid=$(timeout 2 dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${_pkg}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
     fi
+    
+    echo "$_tid"
+}
+
+resize_task_safe() {
+    _tid="$1"
+    _l="$2"
+    _t="$3"
+    _r="$4"
+    _b="$5"
+    
+    [ -z "$_tid" ] && return 1
+
+    cmd activity set-windowing-mode "$_tid" 5 >/dev/null 2>&1
+    am task resize "$_tid" "${_l},${_t},${_r},${_b}" >/dev/null 2>&1
+    am task resize "$_tid" "$_l $_t $_r $_b" >/dev/null 2>&1
+    cmd activity task resize "$_tid" "${_l},${_t},${_r},${_b}" >/dev/null 2>&1
+    cmd activity focus-task "$_tid" >/dev/null 2>&1
+    am stack movetofront "$_tid" >/dev/null 2>&1
 }
 
 read_input_safe() {
@@ -341,8 +365,8 @@ for PKG in $SELECTED_PACKAGES; do
     log_status "Menunggu 8 detik agar aplikasi terbuka..."
     sleep "$LAUNCH_DELAY"
 
-    # Sentuh Recent ➔ Sentuh Logo (640, 96) ➔ Sentuh Freeform (928, 236) ➔ Resize ke Kuadran Grid
-    do_manual_recents_freeform "$PKG" "$L" "$T" "$R" "$B"
+    # Sentuh Recent ➔ Sentuh Logo (640, 96) ➔ Sentuh Freeform (928, 236)
+    do_manual_recents_freeform
 
     idx=$((idx+1))
 done
@@ -355,7 +379,7 @@ input keyevent 3 >/dev/null 2>&1
 sleep 2
 
 # ==============================================================================
-# FASE 3: BUKA KEMBALI SETIAP APLIKASI DARI NOMOR 1 YANG SUDAH DI-RESIZE
+# FASE 3: BUKA KEMBALI SETIAP APLIKASI DARI NOMOR 1 & TERAPKAN RESIZE GRID
 # ==============================================================================
 log_status "Membuka kembali masing-masing aplikasi mulai dari nomor 1..."
 
@@ -377,18 +401,10 @@ for PKG in $SELECTED_PACKAGES; do
     monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
     sleep 2
 
-    # Kunci ukuran & fokuskan ke depan
-    TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${PKG}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
-    if [ -z "$TASK_ID" ]; then
-        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 5 "$PKG" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
-    fi
-
+    # Ambil Task ID secara aman (anti-freeze) dan kunci ukuran grid
+    TASK_ID=$(get_task_id_safe "$PKG")
     if [ -n "$TASK_ID" ]; then
-        cmd activity set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
-        cmd activity resize-task "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
-        am task resize "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
-        cmd activity focus-task "$TASK_ID" >/dev/null 2>&1
-        am stack movetofront "$TASK_ID" >/dev/null 2>&1
+        resize_task_safe "$TASK_ID" "$L" "$T" "$R" "$B"
     fi
 
     idx=$((idx+1))
