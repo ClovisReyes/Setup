@@ -7,7 +7,7 @@
 # ==============================================================================
 
 STATUS_BAR_HEIGHT=20
-HEADER_HEIGHT=36
+HEADER_HEIGHT=
 LAUNCH_DELAY=10
 
 EXCLUDED_PREFIXES="android com.android. com.google.android. com.qualcomm. com.mediatek. com.sec.android. com.xiaomi. com.huawei. org.chromium."
@@ -359,6 +359,11 @@ done
 # ==============================================================================
 # FASE AKHIR: MEMASTIKAN SELURUH JENDELA FOKUS DI DEPAN
 # ==============================================================================
+# Kembali ke Layar Utama (Home) 1x sebelum menyelaraskan seluruh jendela ke depan
+log_status "Menekan tombol Home (kembali ke layar utama)..."
+input keyevent 3 >/dev/null 2>&1
+sleep 1.5
+
 log_status "A12: Menyelaraskan seluruh jendela Grid di layar..."
 sleep 1
 idx=0
