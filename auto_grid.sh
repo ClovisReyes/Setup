@@ -2,7 +2,7 @@
 
 STATUS_BAR_HEIGHT=20
 HEADER_HEIGHT=36
-LAUNCH_DELAY=2
+LAUNCH_DELAY=8
 
 EXCLUDED_PREFIXES="android com.android. com.google.android. com.qualcomm. com.mediatek. com.sec.android. com.xiaomi. com.huawei. org.chromium."
 
@@ -33,7 +33,6 @@ clean_and_inject_window_keys() {
     chattr -i "$xml_file" >/dev/null 2>&1
     chmod 666 "$xml_file" >/dev/null 2>&1
 
-    # Hapus kunci posisi dan kunci boolean freeform lama
     sed -i '/name="app_cloner_.*window/d' "$xml_file" >/dev/null 2>&1
     sed -i '/name="app_cloner_.*freeform/d' "$xml_file" >/dev/null 2>&1
     sed -i '/name="app_cloner_.*floating/d' "$xml_file" >/dev/null 2>&1
@@ -41,7 +40,6 @@ clean_and_inject_window_keys() {
     prefixes="app_cloner_current_window app_cloner_initial_window app_cloner_window app_cloner_default_window app_cloner_last_window app_cloner_saved_window app_cloner_freeform_window"
     
     xml_block=""
-    # 1. Injeksi Kunci Boolean Aktifkan Freeform / Floating Window Mode
     xml_block="${xml_block}  <boolean name=\"app_cloner_freeform_window\" value=\"true\" \/>\n"
     xml_block="${xml_block}  <boolean name=\"app_cloner_floating_window\" value=\"true\" \/>\n"
     xml_block="${xml_block}  <boolean name=\"app_cloner_enable_freeform_window\" value=\"true\" \/>\n"
@@ -51,7 +49,6 @@ clean_and_inject_window_keys() {
     xml_block="${xml_block}  <boolean name=\"app_cloner_remember_window_position\" value=\"true\" \/>\n"
     xml_block="${xml_block}  <boolean name=\"app_cloner_restore_window_position\" value=\"true\" \/>\n"
 
-    # 2. Injeksi Kunci Koordinat Grid Jendela (left, top, right, bottom)
     for prefix in $prefixes; do
         xml_block="${xml_block}  <int name=\"${prefix}_left\" value=\"${left}\" \/>\n"
         xml_block="${xml_block}  <int name=\"${prefix}_top\" value=\"${top}\" \/>\n"
@@ -68,17 +65,36 @@ clean_and_inject_window_keys() {
     fi
 }
 
-trigger_freeform_via_recents() {
+do_manual_recents_freeform() {
     pkg_name="$1"
     
+    RAW_SIZE=""
+    if command -v wm >/dev/null 2>&1; then
+        RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
+    fi
+    [ -z "$RAW_SIZE" ] && RAW_SIZE="1280x720"
+    
+    SW_W=$(echo "$RAW_SIZE" | cut -d'x' -f1)
+    SW_H=$(echo "$RAW_SIZE" | cut -d'x' -f2)
+
     # 1. Buka Recent Apps (KEYCODE_APP_SWITCH = 187)
+    log_status "1. Menekan Recent Apps..."
     input keyevent 187 >/dev/null 2>&1
+    sleep 2
+
+    # 2. Tap Logo Aplikasi (bagian tengah atas kartu) untuk memunculkan menu popup
+    log_status "2. Menekan Logo / Judul Aplikasi..."
+    LOGO_X=$((SW_W / 2))
+    LOGO_Y=$((SW_H * 22 / 100))
+    input tap $LOGO_X $LOGO_Y >/dev/null 2>&1
     sleep 1.5
 
+    # 3. Cari dan Tap Tombol "Freeform"
+    log_status "3. Menekan tombol 'Freeform'..."
+    
     DUMP_FILE="/sdcard/recents_dump.xml"
     rm -f "$DUMP_FILE" >/dev/null 2>&1
 
-    # 2. Dump UI Recent Apps
     if command -v uiautomator >/dev/null 2>&1; then
         uiautomator dump "$DUMP_FILE" >/dev/null 2>&1
     fi
@@ -88,33 +104,6 @@ trigger_freeform_via_recents() {
         FREEFORM_LINE=$(grep -iE 'text="Freeform"|content-desc="Freeform"' "$DUMP_FILE" 2>/dev/null | head -n 1)
     fi
 
-    # Jika menu popup (App info | Split screen | Freeform) belum terbuka
-    if [ -z "$FREEFORM_LINE" ]; then
-        RAW_SIZE=""
-        if command -v wm >/dev/null 2>&1; then
-            RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
-        fi
-        [ -z "$RAW_SIZE" ] && RAW_SIZE="1280x720"
-        
-        SW_W=$(echo "$RAW_SIZE" | cut -d'x' -f1)
-        SW_H=$(echo "$RAW_SIZE" | cut -d'x' -f2)
-        
-        # Tap pada ikon kartu aplikasi di bagian atas tengah (X=50%, Y=22%)
-        TAP_X=$((SW_W / 2))
-        TAP_Y=$((SW_H * 22 / 100))
-        input tap $TAP_X $TAP_Y >/dev/null 2>&1
-        sleep 1
-
-        # Dump ulang UI setelah menu popup terbuka
-        if command -v uiautomator >/dev/null 2>&1; then
-            uiautomator dump "$DUMP_FILE" >/dev/null 2>&1
-            if [ -f "$DUMP_FILE" ]; then
-                FREEFORM_LINE=$(grep -iE 'text="Freeform"|content-desc="Freeform"' "$DUMP_FILE" 2>/dev/null | head -n 1)
-            fi
-        fi
-    fi
-
-    # Jika tombol "Freeform" berhasil terdeteksi via XML UI Dump
     if [ -n "$FREEFORM_LINE" ]; then
         BOUNDS=$(echo "$FREEFORM_LINE" | grep -oE 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | head -n 1)
         if [ -n "$BOUNDS" ]; then
@@ -127,24 +116,16 @@ trigger_freeform_via_recents() {
             CENTER_Y=$(( (Y1 + Y2) / 2 ))
             
             input tap $CENTER_X $CENTER_Y >/dev/null 2>&1
-            sleep 1.5
+            sleep 2
             return 0
         fi
     fi
 
-    # Fallback jika uiautomator tidak didukung: Tap posisi tombol "Freeform" (kanan popup menu)
-    RAW_SIZE=""
-    if command -v wm >/dev/null 2>&1; then
-        RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
-    fi
-    [ -z "$RAW_SIZE" ] && RAW_SIZE="1280x720"
-    SW_W=$(echo "$RAW_SIZE" | cut -d'x' -f1)
-    SW_H=$(echo "$RAW_SIZE" | cut -d'x' -f2)
-
+    # Fallback: Tap posisi tombol "Freeform" (kanan popup menu)
     FB_X=$((SW_W * 78 / 100))
     FB_Y=$((SW_H * 28 / 100))
     input tap $FB_X $FB_Y >/dev/null 2>&1
-    sleep 1.5
+    sleep 2
 }
 
 read_input_safe() {
@@ -358,10 +339,8 @@ GH=$((USABLE_GAME_H / ROWS))
 log_status "Mode Grid: ${MODE_NAME} ${ROWS}x${COLS} (${COUNT} Aplikasi)"
 
 # ==============================================================================
-# PROSES UTAMA: BUKA & OTOMATIS KLIK FREEFORM DI RECENT APPS UNTUK SETIAP APLIKASI
+# ALUR SIMPEL MANUAL: BUKA ➔ INJEKSI GRID ➔ JEDA 8S ➔ RECENT ➔ LOGO ➔ FREEFORM
 # ==============================================================================
-log_status "Membuka seluruh aplikasi & memicu Freeform via Recent Apps..."
-
 idx=0
 for PKG in $SELECTED_PACKAGES; do
     PREF_DIR="/data/data/$PKG/shared_prefs"
@@ -376,9 +355,10 @@ for PKG in $SELECTED_PACKAGES; do
     R=$(((col == COLS - 1) ? SW : (L + GW)))
     B=$(((row == ROWS - 1) ? SH : (T + GH)))
 
-    printf "${GREEN}[%d/%d]${NC} Buka & Otomatis Klik Freeform -> %s\n" "$((idx+1))" "$COUNT" "$PKG"
+    printf "${GREEN}[%d/%d]${NC} Memproses -> %s\n" "$((idx+1))" "$COUNT" "$PKG"
     
     am force-stop "$PKG" >/dev/null 2>&1
+    sleep 1
     
     mkdir -p "$PREF_DIR" >/dev/null 2>&1
     if [ ! -f "$PREF" ]; then
@@ -386,15 +366,18 @@ for PKG in $SELECTED_PACKAGES; do
         echo '<map></map>' >> "$PREF"
     fi
 
+    # Injeksi koordinat Grid
     clean_and_inject_window_keys "$PREF" "$L" "$T" "$R" "$B" "/data/data/$PKG"
 
-    # Launch aplikasi
+    # Buka Aplikasi
     am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" >/dev/null 2>&1
     monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-    sleep 2
 
-    # Triggers Recent Apps & Klik tombol "Freeform" otomatis seperti manual
-    trigger_freeform_via_recents "$PKG"
+    log_status "Menunggu 8 detik agar aplikasi terbuka sempurna di Android 12..."
+    sleep "$LAUNCH_DELAY"
+
+    # Jalankan langkah manual: Recent Apps ➔ Klik Logo ➔ Klik Freeform
+    do_manual_recents_freeform "$PKG"
 
     idx=$((idx+1))
 done
