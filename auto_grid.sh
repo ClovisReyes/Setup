@@ -13,11 +13,26 @@ log_status() { printf "${CYAN}[*]${NC} %s\n" "$1"; }
 log_success() { printf "${GREEN}[+]${NC} %s\n" "$1"; }
 log_error() { printf "${RED}[!]${NC} %s\n" "$1"; }
 
+# Membaca input terminal (prioritas /dev/tty jika stdin dipiped/non-interaktif)
 read_input() {
     prompt_msg="$1"
     [ -n "$prompt_msg" ] && printf "%b" "$prompt_msg" >&2
-    read -r input_val
+    
+    input_val=""
+    if [ -t 0 ]; then
+        read -r input_val
+    elif [ -c /dev/tty ] && (exec 3</dev/tty) 2>/dev/null; then
+        read -r input_val </dev/tty 2>/dev/null
+    else
+        read -r input_val 2>/dev/null
+    fi
+    
+    if [ $? -ne 0 ] || [ -z "$input_val" ]; then
+        echo "EOF"
+        return 1
+    fi
     echo "$input_val"
+    return 0
 }
 
 # 1 Command Pasti: Injeksi SharedPreferences XML (Khusus Android 10 App Cloner)
@@ -137,25 +152,39 @@ ARRAY_CLONES="$@"
 TOTAL_FOUND=$#
 
 printf "${YELLOW}Ditemukan %s Aplikasi Terpasang:${NC}\n" "$TOTAL_FOUND"
-printf "---------------------------------------------------\n"
+echo "---------------------------------------------------"
 i=1
 for pkg in $ARRAY_CLONES; do
     printf "  [%3d] %s\n" "$i" "$pkg"
     i=$((i+1))
 done
-printf "---------------------------------------------------\n"
+echo "---------------------------------------------------"
 
 SELECTED_PACKAGES=""
+ATTEMPTS=0
 while [ -z "$SELECTED_PACKAGES" ]; do
     if [ -n "$ARG_SELECTION" ]; then
         USER_INPUT="$ARG_SELECTION"
     else
         USER_INPUT=$(read_input "${CYAN}Masukkan nomor aplikasi (contoh: 30,31,32,33,34): ${NC}")
     fi
+
+    # Cegah loop tak berujung jika stdin tertutup / non-interaktif
+    if [ "$USER_INPUT" = "EOF" ]; then
+        log_error "Input terminal tertutup (EOF) atau non-interaktif!"
+        log_error "Silakan jalankan perintah dengan menyertakan argumen, contoh:"
+        log_error "  sh setlayout.sh 1,2,3,4 H 12"
+        exit 1
+    fi
     
     USER_INPUT_CLEAN=$(echo "$USER_INPUT" | tr -d ' \r\t')
 
     if [ -z "$USER_INPUT_CLEAN" ]; then
+        ATTEMPTS=$((ATTEMPTS + 1))
+        if [ "$ATTEMPTS" -ge 3 ]; then
+            log_error "Input kosong sebanyak 3 kali. Skrip dihentikan."
+            exit 1
+        fi
         log_error "Input tidak boleh kosong! Masukkan nomor aplikasi."
         ARG_SELECTION=""
         continue
@@ -168,8 +197,23 @@ while [ -z "$SELECTED_PACKAGES" ]; do
     for num in $USER_CHOICE; do
         num_clean=$(echo "$num" | tr -cd '0-9')
         if [ -n "$num_clean" ] && [ "$num_clean" -ge 1 ] && [ "$num_clean" -le "$TOTAL_FOUND" ]; then
-            val=$(echo "$ARRAY_CLONES" | awk -v n="$num_clean" '{print $n}')
-            [ -n "$val" ] && TMP_SELECTION="$TMP_SELECTION $val"
+            # Pencarian item ke-num_clean murni shell (tidak butuh awk)
+            curr_n=1
+            val=""
+            for pkg_item in $ARRAY_CLONES; do
+                if [ "$curr_n" -eq "$num_clean" ]; then
+                    val="$pkg_item"
+                    break
+                fi
+                curr_n=$((curr_n + 1))
+            done
+            
+            if [ -n "$val" ]; then
+                TMP_SELECTION="$TMP_SELECTION $val"
+            else
+                VALID=0
+                break
+            fi
         else
             VALID=0
             break
@@ -179,6 +223,11 @@ while [ -z "$SELECTED_PACKAGES" ]; do
     if [ "$VALID" -eq 1 ] && [ -n "$TMP_SELECTION" ]; then
         SELECTED_PACKAGES=$TMP_SELECTION
     else
+        ATTEMPTS=$((ATTEMPTS + 1))
+        if [ "$ATTEMPTS" -ge 3 ]; then
+            log_error "Input salah sebanyak 3 kali. Skrip dihentikan."
+            exit 1
+        fi
         log_error "Input tidak valid! Masukkan nomor aplikasi yang tersedia."
         ARG_SELECTION=""
     fi
@@ -187,12 +236,20 @@ done
 set -- $SELECTED_PACKAGES
 COUNT=$#
 
+if [ "$COUNT" -le 0 ]; then
+    log_error "Tidak ada aplikasi yang valid untuk ditata!"
+    exit 1
+fi
+
 ORIENT_CHOICE=""
 while [ -z "$ORIENT_CHOICE" ]; do
     if [ -n "$ARG_ORIENT" ]; then
         ORIENT_INPUT="$ARG_ORIENT"
     else
         ORIENT_INPUT=$(read_input "${CYAN}Pilih Orientasi Layar [H] Horizontal / [V] Vertical: ${NC}")
+        if [ "$ORIENT_INPUT" = "EOF" ]; then
+            ORIENT_INPUT="H"
+        fi
     fi
     
     INPUT_CLEAN=$(echo "$ORIENT_INPUT" | tr -d ' \r\t' | tr '[:lower:]' '[:upper:]')
@@ -206,7 +263,8 @@ while [ -z "$ORIENT_CHOICE" ]; do
 done
 
 # 1 Command Pasti: Ambil Resolusi Layar
-RAW_SIZE=$(wm size | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
+RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
+[ -z "$RAW_SIZE" ] && RAW_SIZE="1280x720"
 
 DIM1=$(echo "$RAW_SIZE" | cut -d'x' -f1)
 DIM2=$(echo "$RAW_SIZE" | cut -d'x' -f2)
@@ -225,6 +283,7 @@ if [ "$ORIENT_CHOICE" = "V" ]; then
     SH=$MAX_DIM
 
     case $COUNT in
+        1) COLS=1; ROWS=1 ;;
         2) COLS=1; ROWS=2 ;;
         3) COLS=1; ROWS=3 ;;
         4) COLS=2; ROWS=2 ;;
@@ -239,6 +298,7 @@ else
     SH=$MIN_DIM
 
     case $COUNT in
+        1) COLS=1; ROWS=1 ;;
         2) COLS=2; ROWS=1 ;;
         3) COLS=3; ROWS=1 ;;
         4) COLS=2; ROWS=2 ;;
@@ -249,9 +309,13 @@ else
     esac
 fi
 
+[ "$ROWS" -le 0 ] && ROWS=1
+[ "$COLS" -le 0 ] && COLS=1
+
 # 1 Command Pasti: Deteksi Versi Android OS
-OS_VERSION=$(getprop ro.build.version.release | cut -d'.' -f1)
+OS_VERSION=$(getprop ro.build.version.release 2>/dev/null | cut -d'.' -f1)
 [ -n "$ARG_OS" ] && OS_VERSION="$ARG_OS"
+[ -z "$OS_VERSION" ] && OS_VERSION="12"
 
 # ##############################################################################
 # ==============================================================================
