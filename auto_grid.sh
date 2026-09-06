@@ -3,12 +3,12 @@
 # SCRIPT : setlayout_a12.sh
 # TARGET : Android 12 / 12L (S - API 31/32) Cloud Phone / Emulator
 # DESKRIPSI : Otomatisasi Grid Layout & Freeform Window khusus Android 12
-#              (Bypass Phantom Processes, Native WindowingMode 5, WMS Hierarchy)
+#              (Bypass Phantom Processes, Window Blurs OFF, Presisi Koordinat 1280x720)
 # ==============================================================================
 
-STATUS_BAR_HEIGHT=24
-HEADER_HEIGHT=38
-LAUNCH_DELAY=5
+STATUS_BAR_HEIGHT=20
+HEADER_HEIGHT=36
+LAUNCH_DELAY=10
 
 EXCLUDED_PREFIXES="android com.android. com.google.android. com.qualcomm. com.mediatek. com.sec.android. com.xiaomi. com.huawei. org.chromium."
 
@@ -23,12 +23,13 @@ log_success() { printf "${GREEN}[+]${NC} %s\n" "$1"; }
 log_error() { printf "${RED}[!]${NC} %s\n" "$1"; }
 
 # ------------------------------------------------------------------------------
-# 1. OPTIMASI SISTEM KHUSUS ANDROID 12 (BYPASS PHANTOM PROCESSES & WINDOW BLURS)
+# 1. OPTIMASI SISTEM KHUSUS ANDROID 12 (BYPASS PHANTOM PROCESSES & FREEFORM)
 # ------------------------------------------------------------------------------
 log_status "Mengonfigurasi flag Multi-Window & Bypass Phantom Processes (Android 12)..."
 
-# Matikan batas 32 child processes bawaan Android 12 (Phantom Process Killer)
+# Matikan batas 32 child processes bawaan Android 12 agar background bot tidak di-kill
 /system/bin/device_config put activity_manager max_phantom_processes 2147483647 >/dev/null 2>&1
+settings put global max_phantom_processes 2147483647 >/dev/null 2>&1
 settings put global settings_enable_monitor_phantom_procs 0 >/dev/null 2>&1
 setprop persist.sys.fflag.override.settings_enable_monitor_phantom_procs false >/dev/null 2>&1
 
@@ -99,36 +100,7 @@ clean_and_inject_window_keys() {
 }
 
 # ------------------------------------------------------------------------------
-# 3. DETEKSI TASK ID KHUSUS ANDROID 12 (WindowContainer & TaskOrganizer Hierarchy)
-# ------------------------------------------------------------------------------
-get_task_id_a12() {
-    pkg="$1"
-    task_id=""
-
-    # 1. Format Android 12: topResumedActivity=ActivityRecord{... taskId=123 ...} atau ResumedActivity
-    dump_activities=$(dumpsys activity activities 2>/dev/null)
-    task_id=$(echo "$dump_activities" | grep -E "topResumedActivity|ResumedActivity|mFocusedApp" | grep "$pkg" | grep -oE 'taskId=[0-9]+' | cut -d'=' -f2 | head -n 1)
-    
-    # 2. Format alternatif A12 (t123)
-    if [ -z "$task_id" ] || [ "$task_id" = "0" ]; then
-        task_id=$(echo "$dump_activities" | grep -E "topResumedActivity|ResumedActivity" | grep "$pkg" | grep -oE 't[0-9]+' | tr -d 't' | head -n 1)
-    fi
-
-    # 3. Format dumpsys activity tasks A12 (* Task{... #123 ...})
-    if [ -z "$task_id" ] || [ "$task_id" = "0" ]; then
-        task_id=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${pkg}|${pkg}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
-    fi
-
-    # 4. Format dumpsys window (WindowContainer hierarchy)
-    if [ -z "$task_id" ] || [ "$task_id" = "0" ]; then
-        task_id=$(dumpsys window windows 2>/dev/null | grep "$pkg" | grep -oE 'Task\{[^}]*#[0-9]+' | grep -oE '#[0-9]+' | tr -d '#' | head -n 1)
-    fi
-
-    echo "$task_id"
-}
-
-# ------------------------------------------------------------------------------
-# 4. FALLBACK OTOMATISASI RECENT APPS -> FREEFORM (ADAPTIF LAUNCHER3 ANDROID 12)
+# 3. FUNGSI EKSEKUSI RECENT APPS -> FREEFORM (PRESISI KOORDINAT CLOUDPHONE)
 # ------------------------------------------------------------------------------
 do_manual_recents_freeform_a12() {
     pkg_name="$1"
@@ -136,39 +108,35 @@ do_manual_recents_freeform_a12() {
     top="$3"
     right="$4"
     bottom="$5"
-    screen_w="$6"
-    screen_h="$7"
 
-    # Posisi Logo App di Overview Launcher3 A12
-    LOGO_X=$((screen_w / 2))
-    LOGO_Y=$((screen_h * 85 / 1000))
-    [ "$LOGO_Y" -lt 70 ] && LOGO_Y=105
-
-    # Tombol Freeform di menu kontekstual A12 (biasanya muncul tepat di bawah icon)
-    FF_X=$((screen_w / 2))
-    FF_Y=$((LOGO_Y + 130))
-
-    log_status "A12: Membuka Overview / Recents..."
+    # 1. Buka Recent Apps (KEYCODE_APP_SWITCH = 187)
+    log_status "1. Menekan Recent Apps..."
     input keyevent 187 >/dev/null 2>&1
-    sleep 1.5
-
-    log_status "A12: Mengetuk Icon Aplikasi ($LOGO_X, $LOGO_Y)..."
-    input tap "$LOGO_X" "$LOGO_Y" >/dev/null 2>&1
-    sleep 1.2
-
-    log_status "A12: Mengetuk Opsi Freeform..."
-    # Tap opsi Freeform di dropdown atau fallback koordinat samping
-    input tap "$FF_X" "$FF_Y" >/dev/null 2>&1
-    # Secondary tap jika ROM menggunakan tombol di samping kanan
-    ALT_FF_X=$((screen_w * 73 / 100))
-    ALT_FF_Y=$((screen_h * 18 / 100))
-    input tap "$ALT_FF_X" "$ALT_FF_Y" >/dev/null 2>&1
     sleep 2
 
-    TASK_ID=$(get_task_id_a12 "$pkg_name")
+    # 2. Tap Logo Aplikasi pada koordinat PRESISI X:640 Y:96
+    log_status "2. Menekan Logo Aplikasi (X: 640, Y: 96)..."
+    input tap 640 96 >/dev/null 2>&1
+    sleep 1.5
+
+    # 3. Tap Tombol Freeform pada koordinat PRESISI X:928 Y:236
+    log_status "3. Menekan tombol Freeform (X: 928, Y: 236)..."
+    input tap 928 236 >/dev/null 2>&1
+    sleep 2
+
+    # 4. Ambil Task ID khusus Android 12 (Mendukung taskId= dan t123)
+    TASK_ID=$(dumpsys activity activities 2>/dev/null | grep -E "topResumedActivity|mResumedActivity|ResumedActivity" | grep -oE '(taskId=[0-9]+|t[0-9]+)' | grep -oE '[0-9]+' | head -n 1)
+    if [ -z "$TASK_ID" ] || [ "$TASK_ID" = "0" ]; then
+        TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${pkg_name}|${pkg_name}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
+    fi
+    if [ -z "$TASK_ID" ] || [ "$TASK_ID" = "0" ]; then
+        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 2 "$pkg_name" | grep -oE 'Task\{[^}]*#[0-9]+' | grep -oE '#[0-9]+' | tr -d '#' | head -n 1)
+    fi
+
     if [ -n "$TASK_ID" ] && [ "$TASK_ID" != "0" ]; then
         log_status "Menerapkan posisi Grid Task #${TASK_ID}: (${left},${top} -> ${right},${bottom})"
         cmd activity task resize "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
+        am task resize "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
         cmd activity task focus "$TASK_ID" >/dev/null 2>&1
     else
         log_error "Task ID tidak terdeteksi untuk $pkg_name"
@@ -196,7 +164,7 @@ read_input_safe() {
 ARG_SELECTION="$1"
 ARG_ORIENT="$2"
 
-log_status "Memindai aplikasi terpasang di Android 12..."
+log_status "Memindai aplikasi terpasang (Android 12)..."
 RAW_PACKAGES=$(pm list packages 2>/dev/null | cut -d':' -f2 | sort -u)
 
 FILTERED_PACKAGES=""
@@ -280,7 +248,7 @@ while [ -z "$ORIENT_CHOICE" ]; do
     if [ -n "$ARG_ORIENT" ]; then
         ORIENT_INPUT="$ARG_ORIENT"
     else
-        ORIENT_INPUT=$(read_input_safe "${CYAN}Pilih Orientasi [H] Horizontal / [V] Vertical: ${NC}")
+        ORIENT_INPUT=$(read_input_safe "${CYAN}Pilih Orientasi Layar [H] Horizontal / [V] Vertical: ${NC}")
         [ "$ORIENT_INPUT" = "EOF_DETECTED" ] && ORIENT_INPUT="H"
     fi
     
@@ -292,6 +260,9 @@ while [ -z "$ORIENT_CHOICE" ]; do
         ARG_ORIENT=""
     fi
 done
+
+# Tutup keyboard jika masih terbuka
+input keyevent 111 >/dev/null 2>&1
 
 # Deteksi Resolusi Layar
 RAW_SIZE=""
@@ -348,7 +319,7 @@ GH=$((USABLE_GAME_H / ROWS))
 log_status "Mode Grid Android 12: ${MODE_NAME} ${ROWS}x${COLS} (${COUNT} Aplikasi)"
 
 # ==============================================================================
-# FASE 1: PELUNCURAN CEPAT DENGAN NATIVE WINDOWING_MODE_FREEFORM (5)
+# FASE 1: BUKA SETIAP APLIKASI ➔ UBAH KE FREEFORM ➔ RESIZE KE KUADRAN MASING-MASING
 # ==============================================================================
 idx=0
 for PKG in $SELECTED_PACKAGES; do
@@ -365,31 +336,28 @@ for PKG in $SELECTED_PACKAGES; do
     
     PREF_DIR="/data/data/$PKG/shared_prefs"
     PREF="$PREF_DIR/${PKG}_preferences.xml"
+    mkdir -p "$PREF_DIR" >/dev/null 2>&1
+    if [ ! -f "$PREF" ]; then
+        echo '<?xml version="1.0" encoding="utf-8" standalone="yes"?>' > "$PREF"
+        echo '<map></map>' >> "$PREF"
+    fi
     clean_and_inject_window_keys "$PREF" "$L" "$T" "$R" "$B" "/data/data/$PKG"
 
-    # Android 12 Native: Buka langsung dengan WindowingMode 5 (Freeform)
-    am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" --windowingMode 5 >/dev/null 2>&1
+    # Buka Aplikasi dengan am start & monkey
+    am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" >/dev/null 2>&1
+    monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 
-    # Delay pendek untuk Splash Screen API Android 12
+    log_status "Menunggu $LAUNCH_DELAY detik agar aplikasi terbuka..."
     sleep "$LAUNCH_DELAY"
 
-    # Cek apakah Task ID sudah terdaftar
-    TASK_ID=$(get_task_id_a12 "$PKG")
-    if [ -n "$TASK_ID" ] && [ "$TASK_ID" != "0" ]; then
-        # Langsung resize bounds tanpa membuka Overview
-        cmd activity task resize "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
-    else
-        # Jika peluncuran native belum terdaftar, jalankan monkey & fallback recents
-        monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-        sleep 3
-        do_manual_recents_freeform_a12 "$PKG" "$L" "$T" "$R" "$B" "$SW" "$SH"
-    fi
+    # Sentuh Recent ➔ Sentuh Logo (640, 96) ➔ Sentuh Freeform (928, 236) ➔ Langsung Kunci Grid
+    do_manual_recents_freeform_a12 "$PKG" "$L" "$T" "$R" "$B"
 
     idx=$((idx+1))
 done
 
 # ==============================================================================
-# FASE 2: REALIGNMENT & FOCUS (SHELL TRANSITIONS STABILIZATION)
+# FASE AKHIR: MEMASTIKAN SELURUH JENDELA FOKUS DI DEPAN
 # ==============================================================================
 log_status "A12: Menyelaraskan seluruh jendela Grid di layar..."
 sleep 1
@@ -403,7 +371,9 @@ for PKG in $SELECTED_PACKAGES; do
     R=$(((col == COLS - 1) ? SW : (L + GW)))
     B=$(((row == ROWS - 1) ? SH : (T + GH)))
 
-    TASK_ID=$(get_task_id_a12 "$PKG")
+    TASK_ID=$(dumpsys activity activities 2>/dev/null | grep "$PKG" | grep -oE '(taskId=[0-9]+|t[0-9]+)' | grep -oE '[0-9]+' | head -n 1)
+    [ -z "$TASK_ID" ] && TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${PKG}|${PKG}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
+
     if [ -n "$TASK_ID" ] && [ "$TASK_ID" != "0" ]; then
         cmd activity task resize "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
         cmd activity task focus "$TASK_ID" >/dev/null 2>&1
@@ -412,4 +382,4 @@ for PKG in $SELECTED_PACKAGES; do
 done
 
 echo "---------------------------------------------------"
-log_success "SELESAI! Seluruh ${COUNT} aplikasi tertata di Grid ${MODE_NAME} (Android 12)."
+log_success "SELESAI! Seluruh ${COUNT} aplikasi tertata rapi di Grid ${MODE_NAME} (Android 12)."
