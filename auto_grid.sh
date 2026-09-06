@@ -6,7 +6,6 @@ LAUNCH_DELAY=8
 
 EXCLUDED_PREFIXES="android com.android. com.google.android. com.qualcomm. com.mediatek. com.sec.android. com.xiaomi. com.huawei. org.chromium."
 
-# Pastikan setting sistem Freeform aktif di Android OS
 settings put global enable_freeform_support 1 >/dev/null 2>&1
 settings put global force_resizable_activities 1 >/dev/null 2>&1
 settings put global freeform_window_management 1 >/dev/null 2>&1
@@ -65,9 +64,43 @@ clean_and_inject_window_keys() {
     fi
 }
 
+tap_element_by_pattern() {
+    pattern="$1"
+    dump_file="/sdcard/recents_dump.xml"
+    
+    rm -f "$dump_file" >/dev/null 2>&1
+    if command -v uiautomator >/dev/null 2>&1; then
+        uiautomator dump "$dump_file" >/dev/null 2>&1
+    fi
+    
+    if [ -f "$dump_file" ]; then
+        line=$(grep -iE "$pattern" "$dump_file" 2>/dev/null | head -n 1)
+        if [ -n "$line" ]; then
+            bounds=$(echo "$line" | grep -oE 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | head -n 1)
+            if [ -n "$bounds" ]; then
+                x1=$(echo "$bounds" | grep -oE '[0-9]+' | sed -n '1p')
+                y1=$(echo "$bounds" | grep -oE '[0-9]+' | sed -n '2p')
+                x2=$(echo "$bounds" | grep -oE '[0-9]+' | sed -n '3p')
+                y2=$(echo "$bounds" | grep -oE '[0-9]+' | sed -n '4p')
+                
+                cx=$(( (x1 + x2) / 2 ))
+                cy=$(( (y1 + y2) / 2 ))
+                
+                input tap $cx $cy >/dev/null 2>&1
+                return 0
+            fi
+        fi
+    fi
+    return 1
+}
+
 do_manual_recents_freeform() {
     pkg_name="$1"
-    
+    left="$2"
+    top="$3"
+    right="$4"
+    bottom="$5"
+
     RAW_SIZE=""
     if command -v wm >/dev/null 2>&1; then
         RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
@@ -77,55 +110,50 @@ do_manual_recents_freeform() {
     SW_W=$(echo "$RAW_SIZE" | cut -d'x' -f1)
     SW_H=$(echo "$RAW_SIZE" | cut -d'x' -f2)
 
-    # 1. Buka Recent Apps (KEYCODE_APP_SWITCH = 187)
+    # 1. Cari Task ID & coba ubah windowing mode via CLI
+    TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${pkg_name}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
+    if [ -z "$TASK_ID" ]; then
+        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 5 "$pkg_name" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
+    fi
+
+    if [ -n "$TASK_ID" ]; then
+        cmd activity set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
+        am stack set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
+        cmd activity resize-task "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
+    fi
+
+    # 2. Simulasi Sentuhan Manual: Recent Apps (187)
     log_status "1. Menekan Recent Apps..."
     input keyevent 187 >/dev/null 2>&1
     sleep 2
 
-    # 2. Tap Logo Aplikasi (bagian tengah atas kartu) untuk memunculkan menu popup
-    log_status "2. Menekan Logo / Judul Aplikasi..."
-    LOGO_X=$((SW_W / 2))
-    LOGO_Y=$((SW_H * 22 / 100))
-    input tap $LOGO_X $LOGO_Y >/dev/null 2>&1
-    sleep 1.5
+    # 3. Cek apakah tombol Freeform sudah ada di layar
+    if ! tap_element_by_pattern 'text="Freeform"|content-desc="Freeform"'; then
+        log_status "2. Menekan Logo / Kartu Aplikasi..."
+        
+        # Coba tap elemen logo dari UI dump, atau fallback tap titik tengah atas kartu (X=50%, Y=22%)
+        if ! tap_element_by_pattern 'icon|snapshot_header|title'; then
+            LOGO_X=$((SW_W / 2))
+            LOGO_Y=$((SW_H * 22 / 100))
+            input tap $LOGO_X $LOGO_Y >/dev/null 2>&1
+        fi
+        sleep 1.5
 
-    # 3. Cari dan Tap Tombol "Freeform"
-    log_status "3. Menekan tombol 'Freeform'..."
-    
-    DUMP_FILE="/sdcard/recents_dump.xml"
-    rm -f "$DUMP_FILE" >/dev/null 2>&1
-
-    if command -v uiautomator >/dev/null 2>&1; then
-        uiautomator dump "$DUMP_FILE" >/dev/null 2>&1
-    fi
-
-    FREEFORM_LINE=""
-    if [ -f "$DUMP_FILE" ]; then
-        FREEFORM_LINE=$(grep -iE 'text="Freeform"|content-desc="Freeform"' "$DUMP_FILE" 2>/dev/null | head -n 1)
-    fi
-
-    if [ -n "$FREEFORM_LINE" ]; then
-        BOUNDS=$(echo "$FREEFORM_LINE" | grep -oE 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | head -n 1)
-        if [ -n "$BOUNDS" ]; then
-            X1=$(echo "$BOUNDS" | grep -oE '[0-9]+' | sed -n '1p')
-            Y1=$(echo "$BOUNDS" | grep -oE '[0-9]+' | sed -n '2p')
-            X2=$(echo "$BOUNDS" | grep -oE '[0-9]+' | sed -n '3p')
-            Y2=$(echo "$BOUNDS" | grep -oE '[0-9]+' | sed -n '4p')
-            
-            CENTER_X=$(( (X1 + X2) / 2 ))
-            CENTER_Y=$(( (Y1 + Y2) / 2 ))
-            
-            input tap $CENTER_X $CENTER_Y >/dev/null 2>&1
-            sleep 2
-            return 0
+        log_status "3. Menekan tombol Freeform..."
+        if ! tap_element_by_pattern 'text="Freeform"|content-desc="Freeform"'; then
+            # Fallback tap koordinat tombol Freeform di popup menu
+            FB_X=$((SW_W * 78 / 100))
+            FB_Y=$((SW_H * 28 / 100))
+            input tap $FB_X $FB_Y >/dev/null 2>&1
         fi
     fi
 
-    # Fallback: Tap posisi tombol "Freeform" (kanan popup menu)
-    FB_X=$((SW_W * 78 / 100))
-    FB_Y=$((SW_H * 28 / 100))
-    input tap $FB_X $FB_Y >/dev/null 2>&1
     sleep 2
+
+    # 4. Jika ada Task ID, pastikan ukurannya di-resize ulang
+    if [ -n "$TASK_ID" ]; then
+        cmd activity resize-task "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
+    fi
 }
 
 read_input_safe() {
@@ -377,7 +405,7 @@ for PKG in $SELECTED_PACKAGES; do
     sleep "$LAUNCH_DELAY"
 
     # Jalankan langkah manual: Recent Apps ➔ Klik Logo ➔ Klik Freeform
-    do_manual_recents_freeform "$PKG"
+    do_manual_recents_freeform "$PKG" "$L" "$T" "$R" "$B"
 
     idx=$((idx+1))
 done
