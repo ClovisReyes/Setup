@@ -36,31 +36,26 @@ clean_and_inject_window_keys() {
 launch_app() {
     pkg_name="$1"
     
-    # 1. Cari Main Activity component dari package
-    COMP=""
-    if command -v cmd >/dev/null 2>&1; then
-        COMP=$(cmd package resolve-activity --brief "$pkg_name" 2>/dev/null | tail -n 1 | grep -v "No activity found" | tr -d '\r')
+    # 1. Buka aplikasi menggunakan monkey (Terbukti 100% selalu berhasil membuka aplikasi)
+    monkey -p "$pkg_name" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+
+    # 2. Coba am start --windowingMode 5 jika didukung OS
+    am start --windowingMode 5 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$pkg_name" >/dev/null 2>&1
+
+    # 3. Deteksi Task ID aplikasi di Android 12 & paksa ubah ke mode Freeform (Floating)
+    sleep 1
+    TASK_ID=""
+    if command -v dumpsys >/dev/null 2>&1; then
+        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 3 "$pkg_name" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
+        if [ -z "$TASK_ID" ]; then
+            TASK_ID=$(dumpsys activity activities 2>/dev/null | grep -B 5 "$pkg_name" | grep -oE 'Task\{[a-f0-9]+ #[0-9]+' | grep -oE '[0-9]+$' | head -n 1)
+        fi
     fi
 
-    LAUNCHED=0
-    # 2. Coba am start dengan --windowingMode 5 (Android 12 Direct Freeform Launch)
-    if [ -n "$COMP" ] && [ "$COMP" != "${COMP#*/}" ]; then
-        am start --windowingMode 5 -n "$COMP" >/dev/null 2>&1 && LAUNCHED=1
-    fi
-
-    # 3. Coba Intent Launcher dengan --windowingMode 5
-    if [ "$LAUNCHED" -eq 0 ]; then
-        am start --windowingMode 5 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$pkg_name" >/dev/null 2>&1 && LAUNCHED=1
-    fi
-
-    # 4. Coba cmd activity start-activity --windowingMode 5
-    if [ "$LAUNCHED" -eq 0 ] && command -v cmd >/dev/null 2>&1; then
-        cmd activity start-activity --windowingMode 5 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$pkg_name" >/dev/null 2>&1 && LAUNCHED=1
-    fi
-
-    # 5. Fallback ke monkey jika am start tidak didukung
-    if [ "$LAUNCHED" -eq 0 ]; then
-        monkey -p "$pkg_name" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+    if [ -n "$TASK_ID" ]; then
+        cmd activity set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
+        am stack set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
+        am task set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
     fi
 }
 
@@ -311,4 +306,4 @@ for PKG in $SELECTED_PACKAGES; do
 done
 
 echo "---------------------------------------------------"
-log_success "SELESAI! ${COUNT} aplikasi terbuka di Grid ${MODE_NAME} (Android 12 Direct Freeform Support)."
+log_success "SELESAI! ${COUNT} aplikasi terbuka di Grid ${MODE_NAME}."
