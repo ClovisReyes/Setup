@@ -148,17 +148,13 @@ read_input_safe() {
     [ -n "$prompt_msg" ] && printf "%b" "$prompt_msg" >&2
     
     input_val=""
-    if [ -c /dev/tty ]; then
-        read input_val </dev/tty 2>/dev/null
+    if read -r input_val 2>/dev/null; then
+        echo "$input_val"
+        return 0
+    else
+        echo "EOF_DETECTED"
+        return 1
     fi
-    if [ -z "$input_val" ]; then
-        if ! read input_val 2>/dev/null; then
-            echo "EOF_DETECTED"
-            return 1
-        fi
-    fi
-    echo "$input_val"
-    return 0
 }
 
 ARG_SELECTION="$1"
@@ -210,7 +206,7 @@ while [ -z "$SELECTED_PACKAGES" ]; do
         fi
     fi
     
-    USER_INPUT_CLEAN=$(echo "$USER_INPUT" | tr -d ' \r\t')
+    USER_INPUT_CLEAN=$(echo "$USER_INPUT" | tr -cd '0-9,')
     if [ -z "$USER_INPUT_CLEAN" ]; then
         log_error "Input tidak boleh kosong!"
         ARG_SELECTION=""
@@ -248,21 +244,26 @@ while [ -z "$ORIENT_CHOICE" ]; do
     if [ -n "$ARG_ORIENT" ]; then
         ORIENT_INPUT="$ARG_ORIENT"
     else
-        ORIENT_INPUT=$(read_input_safe "${CYAN}Pilih Orientasi Layar [H] Horizontal / [V] Vertical: ${NC}")
+        ORIENT_INPUT=$(read_input_safe "${CYAN}Pilih Orientasi Layar [H] Horizontal / [V] Vertical (Default H): ${NC}")
         [ "$ORIENT_INPUT" = "EOF_DETECTED" ] && ORIENT_INPUT="H"
     fi
     
-    INPUT_CLEAN=$(echo "$ORIENT_INPUT" | tr -d ' \r\t' | tr '[:lower:]' '[:upper:]')
-    if [ "$INPUT_CLEAN" = "H" ] || [ "$INPUT_CLEAN" = "V" ]; then
-        ORIENT_CHOICE=$INPUT_CLEAN
-    else
-        log_error "Pilihan tidak valid! Masukkan H atau V."
-        ARG_ORIENT=""
-    fi
+    # Bersihkan dari seluruh control code, escape code (^[\x1b), dan ambil huruf saja
+    INPUT_CLEAN=$(echo "$ORIENT_INPUT" | tr -cd 'a-zA-Z' | tr '[:lower:]' '[:upper:]')
+    case "$INPUT_CLEAN" in
+        *V*)
+            ORIENT_CHOICE="V"
+            ;;
+        *H*|"")
+            # Jika user ketik H/h atau langsung tekan ENTER, pilih Horizontal
+            ORIENT_CHOICE="H"
+            ;;
+        *)
+            log_error "Pilihan tidak valid! Masukkan H atau V."
+            ARG_ORIENT=""
+            ;;
+    esac
 done
-
-# Tutup keyboard jika masih terbuka
-input keyevent 111 >/dev/null 2>&1
 
 # Deteksi Resolusi Layar
 RAW_SIZE=""
