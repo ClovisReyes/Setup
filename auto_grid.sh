@@ -65,12 +65,6 @@ clean_and_inject_window_keys() {
 }
 
 do_manual_recents_freeform() {
-    pkg_name="$1"
-    left="$2"
-    top="$3"
-    right="$4"
-    bottom="$5"
-
     # 1. Buka Recent Apps (KEYCODE_APP_SWITCH = 187)
     log_status "1. Menekan Recent Apps..."
     input keyevent 187 >/dev/null 2>&1
@@ -85,18 +79,6 @@ do_manual_recents_freeform() {
     log_status "3. Menekan tombol Freeform (X: 928, Y: 236)..."
     input tap 928 236 >/dev/null 2>&1
     sleep 2
-
-    # 4. Ambil Task ID & Terapkan Resize Bounds di OS
-    TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${pkg_name}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
-    if [ -z "$TASK_ID" ]; then
-        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 5 "$pkg_name" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
-    fi
-
-    if [ -n "$TASK_ID" ]; then
-        cmd activity set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
-        cmd activity resize-task "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
-        am task resize "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
-    fi
 }
 
 read_input_safe() {
@@ -348,15 +330,15 @@ for PKG in $SELECTED_PACKAGES; do
     sleep "$LAUNCH_DELAY"
 
     # Sentuh Recent ➔ Sentuh Logo (640, 96) ➔ Sentuh Freeform (928, 236)
-    do_manual_recents_freeform "$PKG" "$L" "$T" "$R" "$B"
+    do_manual_recents_freeform
 
     idx=$((idx+1))
 done
 
 # ==============================================================================
-# FASE 2: MERAPIKAN SELURUH POSISI GRID & FOKUS JENDELA KE DEPAN
+# FASE 2: MERAPIKAN POSISI GRID (MENCEGAH JENDELA MENUMPUK DI KIRI ATAS)
 # ==============================================================================
-log_status "Merapikan dan menata posisi seluruh jendela Grid 2x2..."
+log_status "Merapikan dan menata posisi seluruh jendela ke Grid 2x2..."
 sleep 1
 
 idx=0
@@ -370,21 +352,27 @@ for PKG in $SELECTED_PACKAGES; do
     R=$(((col == COLS - 1) ? SW : (L + GW)))
     B=$(((row == ROWS - 1) ? SH : (T + GH)))
 
+    printf "${GREEN}[%d/%d]${NC} Menata Grid: Posisi (%d,%d -> %d,%d) -> %s\n" "$((idx+1))" "$COUNT" "$L" "$T" "$R" "$B" "$PKG"
+
+    # Cari Task ID dari aplikasi yang aktif
     TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${PKG}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
     if [ -z "$TASK_ID" ]; then
         TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 5 "$PKG" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
     fi
 
     if [ -n "$TASK_ID" ]; then
+        # Pindahkan dan ubah ukuran jendela langsung ke kuadran gridnya di sistem Android
         cmd activity set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
         cmd activity resize-task "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
         am task resize "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
         cmd activity focus-task "$TASK_ID" >/dev/null 2>&1
         am stack movetofront "$TASK_ID" >/dev/null 2>&1
+    else
+        am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" >/dev/null 2>&1
     fi
     sleep 0.5
     idx=$((idx+1))
 done
 
 echo "---------------------------------------------------"
-log_success "SELESAI! ${COUNT} aplikasi melayang aktif & tertata rapi di Grid ${MODE_NAME}."
+log_success "SELESAI! Seluruh ${COUNT} aplikasi tertata rapi di Grid ${MODE_NAME} tanpa menumpuk."
