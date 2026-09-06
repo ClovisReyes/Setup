@@ -3,11 +3,11 @@
 # SCRIPT : setlayout_a12.sh
 # TARGET : Android 12 / 12L (S - API 31/32) Cloud Phone / Emulator
 # DESKRIPSI : Otomatisasi Grid Layout & Freeform Window khusus Android 12
-#              (Bypass Phantom Processes, Window Blurs OFF, Presisi Koordinat 1280x720)
+#              (Menu Manual Interaktif: Pilihan Aplikasi & Orientasi H/V)
 # ==============================================================================
 
 STATUS_BAR_HEIGHT=20
-HEADER_HEIGHT=
+HEADER_HEIGHT=36
 LAUNCH_DELAY=10
 
 EXCLUDED_PREFIXES="android com.android. com.google.android. com.qualcomm. com.mediatek. com.sec.android. com.xiaomi. com.huawei. org.chromium."
@@ -143,21 +143,6 @@ do_manual_recents_freeform_a12() {
     fi
 }
 
-read_input_safe() {
-    prompt_msg="$1"
-    [ -n "$prompt_msg" ] && printf "%b" "$prompt_msg" >&2
-    
-    input_val=""
-    if [ -t 0 ]; then
-        read -r input_val
-    elif [ -c /dev/tty ]; then
-        read -r input_val </dev/tty 2>/dev/null
-    else
-        read -r input_val 2>/dev/null
-    fi
-    echo "$input_val"
-}
-
 ARG_SELECTION="$1"
 ARG_ORIENT="$2"
 
@@ -186,7 +171,7 @@ set -- $ALL_CLONES
 ARRAY_CLONES="$@"
 TOTAL_FOUND=$#
 
-printf "${YELLOW}Ditemukan %s Aplikasi Terpasang (Android 12):${NC}\n" "$TOTAL_FOUND"
+printf "\n${YELLOW}Ditemukan %s Aplikasi Terpasang (Android 12):${NC}\n" "$TOTAL_FOUND"
 printf "---------------------------------------------------\n"
 i=1
 for pkg in $ARRAY_CLONES; do
@@ -195,51 +180,57 @@ for pkg in $ARRAY_CLONES; do
 done
 printf "---------------------------------------------------\n"
 
+# ------------------------------------------------------------------------------
+# 4. PEMILIHAN APLIKASI (MANUAL & INTERAKTIF)
+# ------------------------------------------------------------------------------
 SELECTED_PACKAGES=""
-TRIES_P=0
 while [ -z "$SELECTED_PACKAGES" ]; do
-    TRIES_P=$((TRIES_P + 1))
-    if [ "$TRIES_P" -gt 5 ]; then
-        log_error "Gagal membaca input interaktif terminal."
-        printf "${YELLOW}Silakan jalankan langsung dengan parameter: sh setlayout_a12.sh 8,9,10,11 H${NC}\n"
-        exit 1
-    fi
-
     if [ -n "$ARG_SELECTION" ]; then
         USER_INPUT="$ARG_SELECTION"
     else
-        USER_INPUT=$(read_input_safe "${CYAN}Masukkan nomor aplikasi (contoh: 8,9,10,11): ${NC}")
+        printf "${CYAN}Masukkan nomor aplikasi yang ingin dibuka (contoh: 8,9,10,11): ${NC}"
+        read -r USER_INPUT
     fi
     
-    # Ubah koma menjadi spasi dan ambil hanya angka & spasi
-    USER_INPUT_FORMATTED=$(echo "$USER_INPUT" | tr ',' ' ' | tr -cd '0-9 \n\r')
-    if [ -z "$USER_INPUT_FORMATTED" ]; then
-        log_error "Input tidak boleh kosong! Masukkan nomor aplikasi (contoh: 8,9,10,11)."
+    USER_INPUT_CLEAN=$(echo "$USER_INPUT" | tr -d '\r\n\t' | tr ',' ' ')
+    
+    if [ -z "$USER_INPUT_CLEAN" ]; then
+        printf "${RED}[!] Input tidak boleh kosong! Masukkan nomor aplikasi.${NC}\n"
         ARG_SELECTION=""
-        sleep 0.5
         continue
     fi
 
     VALID=1
     TMP_SELECTION=""
     
-    for num in $USER_INPUT_FORMATTED; do
-        [ -z "$num" ] && continue
-        if [ "$num" -ge 1 ] 2>/dev/null && [ "$num" -le "$TOTAL_FOUND" ] 2>/dev/null; then
-            val=$(echo "$ARRAY_CLONES" | awk -v n="$num" '{print $n}')
-            [ -n "$val" ] && TMP_SELECTION="$TMP_SELECTION $val"
-        else
-            VALID=0
-            break
-        fi
+    for num in $USER_INPUT_CLEAN; do
+        case "$num" in
+            ''|*[!0-9]*)
+                VALID=0
+                break
+                ;;
+            *)
+                if [ "$num" -ge 1 ] && [ "$num" -le "$TOTAL_FOUND" ]; then
+                    val=$(echo "$ARRAY_CLONES" | awk -v n="$num" '{print $n}')
+                    if [ -n "$val" ]; then
+                        TMP_SELECTION="$TMP_SELECTION $val"
+                    else
+                        VALID=0
+                        break
+                    fi
+                else
+                    VALID=0
+                    break
+                fi
+                ;;
+        esac
     done
     
     if [ "$VALID" -eq 1 ] && [ -n "$TMP_SELECTION" ]; then
         SELECTED_PACKAGES=$(echo "$TMP_SELECTION" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
     else
-        log_error "Nomor aplikasi tidak valid! Pilih nomor antara 1 sampai $TOTAL_FOUND."
+        printf "${RED}[!] Nomor aplikasi tidak valid! Pilih nomor antara 1 sampai %d (contoh: 8,9,10,11).${NC}\n" "$TOTAL_FOUND"
         ARG_SELECTION=""
-        sleep 0.5
     fi
 done
 
@@ -251,38 +242,39 @@ if [ "$COUNT" -eq 0 ]; then
     exit 1
 fi
 
+# ------------------------------------------------------------------------------
+# 5. PEMILIHAN ORIENTASI LAYAR (MANUAL PILIHAN H ATAU V)
+# ------------------------------------------------------------------------------
 ORIENT_CHOICE=""
-TRIES_O=0
 while [ -z "$ORIENT_CHOICE" ]; do
-    TRIES_O=$((TRIES_O + 1))
-    if [ "$TRIES_O" -gt 5 ]; then
-        ORIENT_CHOICE="H"
-        break
-    fi
-
     if [ -n "$ARG_ORIENT" ]; then
         ORIENT_INPUT="$ARG_ORIENT"
     else
-        ORIENT_INPUT=$(read_input_safe "${CYAN}Pilih Orientasi Layar [H] Horizontal / [V] Vertical (Default H): ${NC}")
+        printf "\n${YELLOW}Pilih Orientasi Layar:${NC}\n"
+        printf "  [1] Horizontal (Landscape)\n"
+        printf "  [2] Vertical   (Portrait)\n"
+        printf "${CYAN}Masukkan pilihan [1 / 2 atau H / V]: ${NC}"
+        read -r ORIENT_INPUT
     fi
     
-    INPUT_CLEAN=$(echo "$ORIENT_INPUT" | tr -cd 'a-zA-Z' | tr '[:lower:]' '[:upper:]')
-    case "$INPUT_CLEAN" in
-        *V*)
-            ORIENT_CHOICE="V"
-            ;;
-        *H*|"")
+    CLEAN_O=$(echo "$ORIENT_INPUT" | tr -d ' \r\n\t' | tr '[:lower:]' '[:upper:]')
+    case "$CLEAN_O" in
+        1|H|HORIZONTAL)
             ORIENT_CHOICE="H"
             ;;
+        2|V|VERTICAL)
+            ORIENT_CHOICE="V"
+            ;;
         *)
-            log_error "Pilihan tidak valid! Masukkan H atau V."
+            printf "${RED}[!] Pilihan tidak valid! Masukkan 1 (Horizontal) atau 2 (Vertical).${NC}\n"
             ARG_ORIENT=""
-            sleep 0.5
             ;;
     esac
 done
 
-# Deteksi Resolusi Layar
+# ------------------------------------------------------------------------------
+# 6. DETEKSI RESOLUSI & KALKULASI GRID
+# ------------------------------------------------------------------------------
 RAW_SIZE=""
 command -v wm >/dev/null 2>&1 && RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
 [ -z "$RAW_SIZE" ] && RAW_SIZE=$(dumpsys display 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | head -n 1)
@@ -345,7 +337,9 @@ USABLE_GAME_H=$((SH - STATUS_BAR_HEIGHT - TOTAL_HEADERS))
 GW=$((SW / COLS))
 GH=$((USABLE_GAME_H / ROWS))
 
+printf "\n"
 log_status "Mode Grid Android 12: ${MODE_NAME} ${ROWS}x${COLS} (${COUNT} Aplikasi)"
+printf "---------------------------------------------------\n"
 
 # ==============================================================================
 # FASE 1: BUKA SETIAP APLIKASI ➔ UBAH KE FREEFORM ➔ RESIZE KE KUADRAN MASING-MASING
