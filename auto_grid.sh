@@ -2,11 +2,10 @@
 
 STATUS_BAR_HEIGHT=20
 HEADER_HEIGHT=36
-LAUNCH_DELAY=3
+LAUNCH_DELAY=8
 
 EXCLUDED_PREFIXES="android com.android. com.google.android. com.qualcomm. com.mediatek. com.sec.android. com.xiaomi. com.huawei. org.chromium."
 
-# Pengaturan Sistem Android 12 untuk Mengaktifkan Mode Freeform Native
 settings put global enable_freeform_support 1 >/dev/null 2>&1
 settings put global force_resizable_activities 1 >/dev/null 2>&1
 settings put global freeform_window_management 1 >/dev/null 2>&1
@@ -65,40 +64,36 @@ clean_and_inject_window_keys() {
     fi
 }
 
-launch_app_android12_freeform() {
+do_manual_recents_freeform() {
     pkg_name="$1"
     left="$2"
     top="$3"
     right="$4"
     bottom="$5"
 
-    # 1. Cari komponen Utama Activity secara presisi dari package (Wajib untuk flag -n di Android 12)
-    COMP=""
-    if command -v pm >/dev/null 2>&1; then
-        COMP=$(pm dump "$pkg_name" 2>/dev/null | grep -A 3 "android.intent.action.MAIN" | grep -oE '[a-zA-Z0-9._]+/[a-zA-Z0-9._]+' | head -n 1)
-    fi
-
-    # 2. Peluncuran Presisi Android 12 menggunakan flag --windowingMode 5 dan spesifikasi komponen -n
-    if [ -n "$COMP" ]; then
-        am start --windowingMode 5 -n "$COMP" >/dev/null 2>&1
-        cmd activity start-activity --windowingMode 5 -n "$COMP" >/dev/null 2>&1
-    else
-        am start --windowingMode 5 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$pkg_name" >/dev/null 2>&1
-    fi
-
-    # 3. Ambil Task ID dan Terapkan Resize Bounds secara instan di sistem OS Android 12
+    # 1. Buka Recent Apps (KEYCODE_APP_SWITCH = 187)
+    log_status "1. Menekan Recent Apps..."
+    input keyevent 187 >/dev/null 2>&1
     sleep 2
+
+    # 2. Tap Logo Aplikasi pada koordinat PRESISI X:640 Y:96
+    log_status "2. Menekan Logo Aplikasi (X: 640, Y: 96)..."
+    input tap 640 96 >/dev/null 2>&1
+    sleep 1.5
+
+    # 3. Tap Tombol Freeform pada koordinat PRESISI X:928 Y:236
+    log_status "3. Menekan tombol Freeform (X: 928, Y: 236)..."
+    input tap 928 236 >/dev/null 2>&1
+    sleep 2
+
+    # 4. Ambil Task ID & Resize Bounds presisi
     TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${pkg_name}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
     if [ -z "$TASK_ID" ]; then
         TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 5 "$pkg_name" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
     fi
 
     if [ -n "$TASK_ID" ]; then
-        cmd activity set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
-        am stack set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
         cmd activity resize-task "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
-        am task resize "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
-        cmd activity focus-task "$TASK_ID" >/dev/null 2>&1
     fi
 }
 
@@ -313,7 +308,7 @@ GH=$((USABLE_GAME_H / ROWS))
 log_status "Mode Grid: ${MODE_NAME} ${ROWS}x${COLS} (${COUNT} Aplikasi)"
 
 # ==============================================================================
-# ALUR PRESISI NATIVE ANDROID 12 (TANPA TEBAK SENTUHAN/INPUT TAP)
+# ALUR OTOMATIS DENGAN KOORDINAT PRESISI KOORDINAT LOGO (640, 96) & FREEFORM (928, 236)
 # ==============================================================================
 idx=0
 for PKG in $SELECTED_PACKAGES; do
@@ -329,7 +324,7 @@ for PKG in $SELECTED_PACKAGES; do
     R=$(((col == COLS - 1) ? SW : (L + GW)))
     B=$(((row == ROWS - 1) ? SH : (T + GH)))
 
-    printf "${GREEN}[%d/%d]${NC} Setup Direct Freeform Grid -> %s\n" "$((idx+1))" "$COUNT" "$PKG"
+    printf "${GREEN}[%d/%d]${NC} Memproses -> %s\n" "$((idx+1))" "$COUNT" "$PKG"
     
     am force-stop "$PKG" >/dev/null 2>&1
     sleep 1
@@ -343,11 +338,15 @@ for PKG in $SELECTED_PACKAGES; do
     # Injeksi koordinat Grid
     clean_and_inject_window_keys "$PREF" "$L" "$T" "$R" "$B" "/data/data/$PKG"
 
-    # Buka Aplikasi langsung dalam mode Freeform di Android 12
-    launch_app_android12_freeform "$PKG" "$L" "$T" "$R" "$B"
+    # Buka Aplikasi
+    am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" >/dev/null 2>&1
+    monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 
-    log_status "Jeda ${LAUNCH_DELAY} detik..."
+    log_status "Menunggu 8 detik agar aplikasi terbuka sempurna..."
     sleep "$LAUNCH_DELAY"
+
+    # Sentuh Recent ➔ Sentuh Logo (640, 96) ➔ Sentuh Freeform (928, 236)
+    do_manual_recents_freeform "$PKG" "$L" "$T" "$R" "$B"
 
     idx=$((idx+1))
 done
