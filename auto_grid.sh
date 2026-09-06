@@ -148,7 +148,9 @@ read_input_safe() {
     [ -n "$prompt_msg" ] && printf "%b" "$prompt_msg" >&2
     
     input_val=""
-    if [ -c /dev/tty ]; then
+    if [ -t 0 ]; then
+        read -r input_val
+    elif [ -c /dev/tty ]; then
         read -r input_val </dev/tty 2>/dev/null
     else
         read -r input_val 2>/dev/null
@@ -194,29 +196,37 @@ done
 printf "---------------------------------------------------\n"
 
 SELECTED_PACKAGES=""
+TRIES_P=0
 while [ -z "$SELECTED_PACKAGES" ]; do
+    TRIES_P=$((TRIES_P + 1))
+    if [ "$TRIES_P" -gt 5 ]; then
+        log_error "Gagal membaca input interaktif terminal."
+        printf "${YELLOW}Silakan jalankan langsung dengan parameter: sh setlayout_a12.sh 8,9,10,11 H${NC}\n"
+        exit 1
+    fi
+
     if [ -n "$ARG_SELECTION" ]; then
         USER_INPUT="$ARG_SELECTION"
     else
         USER_INPUT=$(read_input_safe "${CYAN}Masukkan nomor aplikasi (contoh: 8,9,10,11): ${NC}")
     fi
     
-    USER_INPUT_CLEAN=$(echo "$USER_INPUT" | tr -cd '0-9,')
-    if [ -z "$USER_INPUT_CLEAN" ]; then
+    # Ubah koma menjadi spasi dan ambil hanya angka & spasi
+    USER_INPUT_FORMATTED=$(echo "$USER_INPUT" | tr ',' ' ' | tr -cd '0-9 \n\r')
+    if [ -z "$USER_INPUT_FORMATTED" ]; then
         log_error "Input tidak boleh kosong! Masukkan nomor aplikasi (contoh: 8,9,10,11)."
         ARG_SELECTION=""
         sleep 0.5
         continue
     fi
 
-    USER_CHOICE=$(echo "$USER_INPUT_CLEAN" | tr ',' ' ')
     VALID=1
     TMP_SELECTION=""
     
-    for num in $USER_CHOICE; do
-        num_clean=$(echo "$num" | tr -cd '0-9')
-        if [ -n "$num_clean" ] && [ "$num_clean" -ge 1 ] && [ "$num_clean" -le "$TOTAL_FOUND" ]; then
-            val=$(echo "$ARRAY_CLONES" | awk -v n="$num_clean" '{print $n}')
+    for num in $USER_INPUT_FORMATTED; do
+        [ -z "$num" ] && continue
+        if [ "$num" -ge 1 ] 2>/dev/null && [ "$num" -le "$TOTAL_FOUND" ] 2>/dev/null; then
+            val=$(echo "$ARRAY_CLONES" | awk -v n="$num" '{print $n}')
             [ -n "$val" ] && TMP_SELECTION="$TMP_SELECTION $val"
         else
             VALID=0
@@ -242,7 +252,14 @@ if [ "$COUNT" -eq 0 ]; then
 fi
 
 ORIENT_CHOICE=""
+TRIES_O=0
 while [ -z "$ORIENT_CHOICE" ]; do
+    TRIES_O=$((TRIES_O + 1))
+    if [ "$TRIES_O" -gt 5 ]; then
+        ORIENT_CHOICE="H"
+        break
+    fi
+
     if [ -n "$ARG_ORIENT" ]; then
         ORIENT_INPUT="$ARG_ORIENT"
     else
@@ -274,6 +291,9 @@ command -v wm >/dev/null 2>&1 && RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9
 DIM1=$(echo "$RAW_SIZE" | cut -d'x' -f1)
 DIM2=$(echo "$RAW_SIZE" | cut -d'x' -f2)
 
+[ -z "$DIM1" ] && DIM1=1280
+[ -z "$DIM2" ] && DIM2=720
+
 if [ "$DIM1" -gt "$DIM2" ]; then
     MAX_DIM=$DIM1
     MIN_DIM=$DIM2
@@ -281,6 +301,9 @@ else
     MAX_DIM=$DIM2
     MIN_DIM=$DIM1
 fi
+
+COLS=2
+ROWS=2
 
 if [ "$ORIENT_CHOICE" = "V" ]; then
     MODE_NAME="VERTICAL (Portrait)"
