@@ -127,7 +127,7 @@ trigger_freeform_via_recents() {
             CENTER_Y=$(( (Y1 + Y2) / 2 ))
             
             input tap $CENTER_X $CENTER_Y >/dev/null 2>&1
-            sleep 1
+            sleep 1.5
             return 0
         fi
     fi
@@ -144,7 +144,7 @@ trigger_freeform_via_recents() {
     FB_X=$((SW_W * 78 / 100))
     FB_Y=$((SW_H * 28 / 100))
     input tap $FB_X $FB_Y >/dev/null 2>&1
-    sleep 1
+    sleep 1.5
 }
 
 read_input_safe() {
@@ -358,9 +358,9 @@ GH=$((USABLE_GAME_H / ROWS))
 log_status "Mode Grid: ${MODE_NAME} ${ROWS}x${COLS} (${COUNT} Aplikasi)"
 
 # ==============================================================================
-# FASE 1: MEMBUKA APLIKASI 1-4 & KLIK TOMBOL "FREEFORM" DI RECENT APPS OTOMATIS
+# PROSES UTAMA: BUKA & OTOMATIS KLIK FREEFORM DI RECENT APPS UNTUK SETIAP APLIKASI
 # ==============================================================================
-log_status "FASE 1: Membuka Aplikasi 1-4 & Menekan Tombol 'Freeform' di Recent Apps..."
+log_status "Membuka seluruh aplikasi & memicu Freeform via Recent Apps..."
 
 idx=0
 for PKG in $SELECTED_PACKAGES; do
@@ -376,7 +376,7 @@ for PKG in $SELECTED_PACKAGES; do
     R=$(((col == COLS - 1) ? SW : (L + GW)))
     B=$(((row == ROWS - 1) ? SH : (T + GH)))
 
-    printf "${GREEN}[1/2 - %d/%d]${NC} Buka & Otomatis Klik Freeform -> %s\n" "$((idx+1))" "$COUNT" "$PKG"
+    printf "${GREEN}[%d/%d]${NC} Buka & Otomatis Klik Freeform -> %s\n" "$((idx+1))" "$COUNT" "$PKG"
     
     am force-stop "$PKG" >/dev/null 2>&1
     
@@ -396,27 +396,6 @@ for PKG in $SELECTED_PACKAGES; do
     # Triggers Recent Apps & Klik tombol "Freeform" otomatis seperti manual
     trigger_freeform_via_recents "$PKG"
 
-    idx=$((idx+1))
-done
-
-# ==============================================================================
-# FASE 2: MEMENSET KEMBALI APLIKASI 1-4 YANG SUDAH DALAM MODE FREEFORM
-# ==============================================================================
-log_status "FASE 2: Memenget Kembali Aplikasi 1-4 yang Sudah di Freeform..."
-
-# Tekan HOME untuk keluar dari Recent Apps
-input keyevent 3 >/dev/null 2>&1
-sleep 1
-
-idx=0
-for PKG in $SELECTED_PACKAGES; do
-    printf "${GREEN}[2/2 - %d/%d]${NC} Membuka Kembali (Pencet Ulang) -> %s\n" "$((idx+1))" "$COUNT" "$PKG"
-    
-    # Mencet ulang aplikasi 1,2,3,4 yang sudah di-freeform
-    am start --windowingMode 5 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" >/dev/null 2>&1
-    monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-    
-    sleep 1
     idx=$((idx+1))
 done
 
