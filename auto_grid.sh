@@ -17,7 +17,7 @@ log_status() { printf "${CYAN}[*]${NC} %s\n" "$1"; }
 log_success() { printf "${GREEN}[+]${NC} %s\n" "$1"; }
 log_error() { printf "${RED}[!]${NC} %s\n" "$1"; }
 
-# 1 Command Pasti: Injeksi SharedPreferences XML (Khusus Android 10 App Cloner)
+# 1. Injeksi SharedPreferences XML (Khusus Android 10 App Cloner)
 clean_and_inject_window_keys() {
     xml_file="$1"
     left="$2"
@@ -30,6 +30,10 @@ clean_and_inject_window_keys() {
 
     pref_dir=$(dirname "$xml_file")
     mkdir -p "$pref_dir" >/dev/null 2>&1
+    chmod 777 "$pref_dir" >/dev/null 2>&1
+
+    chattr -i "$xml_file" >/dev/null 2>&1
+    chmod 666 "$xml_file" >/dev/null 2>&1
 
     existing_content=""
     if [ -f "$xml_file" ]; then
@@ -59,13 +63,34 @@ clean_and_inject_window_keys() {
         echo '</map>'
     } > "$xml_file"
 
-    chmod 666 "$xml_file" >/dev/null 2>&1
+    # Wajib 444 agar koordinat tidak di-overwrite kembali oleh App Cloner saat aplikasi terbuka
+    chmod 444 "$xml_file" >/dev/null 2>&1
     if [ -n "$APP_OWNER" ]; then
         chown -R "$APP_OWNER" "$pref_dir" >/dev/null 2>&1
     fi
 }
 
-# 1 Command Pasti per Aksi: Freeform Transition Android 12
+# Fungsi Ekstrak Task ID Akurat (Menghindari Hist #0)
+get_task_id() {
+    _pkg="$1"
+    _tid=""
+    # 1. Cari Task ID dari baris Task yang memiliki Affinity A=...:pkg
+    _tid=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${_pkg}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
+    
+    # 2. Jika belum ketemu, cari taskId= dari recents
+    if [ -z "$_tid" ] || [ "$_tid" = "0" ]; then
+        _tid=$(dumpsys activity recents 2>/dev/null | grep -B 5 "$_pkg" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
+    fi
+    
+    # 3. Jika belum ketemu, cari dari Task{... #ID ...}
+    if [ -z "$_tid" ] || [ "$_tid" = "0" ]; then
+        _tid=$(dumpsys activity activities 2>/dev/null | grep -B 3 "$_pkg" | grep -oE 'Task\{[a-f0-9]+ #[0-9]+' | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
+    fi
+    
+    echo "$_tid"
+}
+
+# Transisi Freeform Android 12 via Recent Apps + Resize
 do_manual_recents_freeform() {
     pkg_name="$1"
     left="$2"
@@ -73,32 +98,34 @@ do_manual_recents_freeform() {
     right="$4"
     bottom="$5"
 
-    # 1 Command: Buka Recent Apps
+    # 1. Buka Recent Apps
     log_status "1. Menekan Recent Apps..."
     input keyevent 187
     sleep 2
 
-    # 1 Command: Tap Logo Aplikasi (640, 96)
+    # 2. Tap Logo Aplikasi (640, 96)
     log_status "2. Menekan Logo Aplikasi (X: 640, Y: 96)..."
     input tap 640 96
     sleep 1.5
 
-    # 1 Command: Tap Tombol Freeform (928, 236)
+    # 3. Tap Tombol Freeform (928, 236)
     log_status "3. Menekan tombol Freeform (X: 928, Y: 236)..."
     input tap 928 236
     sleep 2
 
-    # 1 Command Pasti: Ambil Task ID dari task list OS
-    TASK_ID=$(dumpsys activity tasks | grep "$pkg_name" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
+    # 4. Ambil Task ID Akurat
+    TASK_ID=$(get_task_id "$pkg_name")
 
-    if [ -n "$TASK_ID" ]; then
+    if [ -n "$TASK_ID" ] && [ "$TASK_ID" != "0" ]; then
         log_status "Menerapkan posisi Grid Task #${TASK_ID}: (${left},${top} -> ${right},${bottom})"
-        # 1 Command Pasti: Resize Task
-        cmd activity task resize "$TASK_ID" "$left" "$top" "$right" "$bottom"
-        # 1 Command Pasti: Fokuskan Task
-        cmd activity task focus "$TASK_ID"
+        cmd activity set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
+        cmd activity task resize "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
+        am task resize "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
+        am task resize "$TASK_ID" "${left},${top},${right},${bottom}" >/dev/null 2>&1
+        cmd activity task focus "$TASK_ID" >/dev/null 2>&1
     else
-        log_error "Task ID tidak ditemukan untuk $pkg_name"
+        log_error "Task ID tidak ditemukan untuk $pkg_name, mencoba resize via package..."
+        am task resize "$pkg_name" "${left},${top},${right},${bottom}" >/dev/null 2>&1
     fi
 }
 
@@ -313,10 +340,12 @@ fi
 [ "$ROWS" -le 0 ] && ROWS=1
 [ "$COLS" -le 0 ] && COLS=1
 
-# 1 Command Pasti: Deteksi Versi Android OS
+# Deteksi Versi Android OS
 OS_VERSION=$(getprop ro.build.version.release 2>/dev/null | cut -d'.' -f1)
 [ -n "$ARG_OS" ] && OS_VERSION="$ARG_OS"
 [ -z "$OS_VERSION" ] && OS_VERSION="12"
+
+log_status "Versi Android Terdeteksi: Android $OS_VERSION (Resolusi: ${SW}x${SH})"
 
 # ##############################################################################
 # ==============================================================================
@@ -455,13 +484,13 @@ else
         R=$(((col == COLS - 1) ? SW : (L + GW)))
         B=$(((row == ROWS - 1) ? SH : (T + GH)))
 
-        # 1 Command Pasti: Ambil Task ID
-        TASK_ID=$(dumpsys activity tasks | grep "$PKG" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
+        TASK_ID=$(get_task_id "$PKG")
 
-        if [ -n "$TASK_ID" ]; then
-            # 1 Command Pasti: Resize Task
+        if [ -n "$TASK_ID" ] && [ "$TASK_ID" != "0" ]; then
+            cmd activity set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
             cmd activity task resize "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
-            # 1 Command Pasti: Fokuskan Task
+            am task resize "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
+            am task resize "$TASK_ID" "${L},${T},${R},${B}" >/dev/null 2>&1
             cmd activity task focus "$TASK_ID" >/dev/null 2>&1
         fi
         idx=$((idx+1))
