@@ -1,14 +1,7 @@
 #!/system/bin/sh
-# ==============================================================================
-# SCRIPT : setlayout_a12.sh
-# TARGET : Android 12 / 12L (S - API 31/32) Cloud Phone / Emulator
-# DESKRIPSI : Otomatisasi Grid Layout & Freeform Window khusus Android 12
-#              (Menu Manual Interaktif: Pilihan Aplikasi & Orientasi H/V)
-# ==============================================================================
 
-STATUS_BAR_HEIGHT=
-HEADER_HEIGHT=5
-LAUNCH_DELAY=10
+TOP_OFFSET=50
+LAUNCH_DELAY=5
 
 EXCLUDED_PREFIXES="android com.android. com.google.android. com.qualcomm. com.mediatek. com.sec.android. com.xiaomi. com.huawei. org.chromium."
 
@@ -22,18 +15,13 @@ log_status() { printf "${CYAN}[*]${NC} %s\n" "$1"; }
 log_success() { printf "${GREEN}[+]${NC} %s\n" "$1"; }
 log_error() { printf "${RED}[!]${NC} %s\n" "$1"; }
 
-# ------------------------------------------------------------------------------
-# 1. OPTIMASI SISTEM KHUSUS ANDROID 12 (BYPASS PHANTOM PROCESSES & FREEFORM)
-# ------------------------------------------------------------------------------
 log_status "Mengonfigurasi flag Multi-Window & Bypass Phantom Processes (Android 12)..."
 
-# Matikan batas 32 child processes bawaan Android 12 agar background bot tidak di-kill
 /system/bin/device_config put activity_manager max_phantom_processes 2147483647 >/dev/null 2>&1
 settings put global max_phantom_processes 2147483647 >/dev/null 2>&1
 settings put global settings_enable_monitor_phantom_procs 0 >/dev/null 2>&1
 setprop persist.sys.fflag.override.settings_enable_monitor_phantom_procs false >/dev/null 2>&1
 
-# Aktifkan Freeform & Matikan efek blur render yang memberatkan GPU di Android 12
 settings put global enable_freeform_support 1 >/dev/null 2>&1
 settings put global force_resizable_activities 1 >/dev/null 2>&1
 settings put global freeform_window_management 1 >/dev/null 2>&1
@@ -41,9 +29,6 @@ settings put global disable_window_blurs 1 >/dev/null 2>&1
 setprop persist.sys.debug.freeform_window 1 >/dev/null 2>&1
 setprop persist.sys.debug.force_resizable 1 >/dev/null 2>&1
 
-# ------------------------------------------------------------------------------
-# 2. INJEKSI PREFERENSI WINDOW APP CLONER (SHARED PREFS XML)
-# ------------------------------------------------------------------------------
 clean_and_inject_window_keys() {
     xml_file="$1"
     left="$2"
@@ -99,9 +84,6 @@ clean_and_inject_window_keys() {
     fi
 }
 
-# ------------------------------------------------------------------------------
-# 3. FUNGSI EKSEKUSI RECENT APPS -> FREEFORM (PRESISI KOORDINAT CLOUDPHONE)
-# ------------------------------------------------------------------------------
 do_manual_recents_freeform_a12() {
     pkg_name="$1"
     left="$2"
@@ -109,22 +91,18 @@ do_manual_recents_freeform_a12() {
     right="$4"
     bottom="$5"
 
-    # 1. Buka Recent Apps (KEYCODE_APP_SWITCH = 187)
     log_status "1. Menekan Recent Apps..."
     input keyevent 187 >/dev/null 2>&1
     sleep 2
 
-    # 2. Tap Logo Aplikasi pada koordinat PRESISI X:640 Y:96
     log_status "2. Menekan Logo Aplikasi (X: 640, Y: 96)..."
     input tap 640 96 >/dev/null 2>&1
     sleep 1.5
 
-    # 3. Tap Tombol Freeform pada koordinat PRESISI X:928 Y:236
     log_status "3. Menekan tombol Freeform (X: 928, Y: 236)..."
     input tap 928 236 >/dev/null 2>&1
     sleep 2
 
-    # 4. Ambil Task ID khusus Android 12 (Mendukung taskId= dan t123)
     TASK_ID=$(dumpsys activity activities 2>/dev/null | grep -E "topResumedActivity|mResumedActivity|ResumedActivity" | grep -oE '(taskId=[0-9]+|t[0-9]+)' | grep -oE '[0-9]+' | head -n 1)
     if [ -z "$TASK_ID" ] || [ "$TASK_ID" = "0" ]; then
         TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${pkg_name}|${pkg_name}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
@@ -180,9 +158,6 @@ for pkg in $ARRAY_CLONES; do
 done
 printf "---------------------------------------------------\n"
 
-# ------------------------------------------------------------------------------
-# 4. PEMILIHAN APLIKASI (MANUAL & INTERAKTIF)
-# ------------------------------------------------------------------------------
 SELECTED_PACKAGES=""
 while [ -z "$SELECTED_PACKAGES" ]; do
     if [ -n "$ARG_SELECTION" ]; then
@@ -242,9 +217,6 @@ if [ "$COUNT" -eq 0 ]; then
     exit 1
 fi
 
-# ------------------------------------------------------------------------------
-# 5. PEMILIHAN ORIENTASI LAYAR (MANUAL PILIHAN H ATAU V)
-# ------------------------------------------------------------------------------
 ORIENT_CHOICE=""
 while [ -z "$ORIENT_CHOICE" ]; do
     if [ -n "$ARG_ORIENT" ]; then
@@ -272,9 +244,6 @@ while [ -z "$ORIENT_CHOICE" ]; do
     esac
 done
 
-# ------------------------------------------------------------------------------
-# 6. DETEKSI RESOLUSI & KALKULASI GRID
-# ------------------------------------------------------------------------------
 RAW_SIZE=""
 command -v wm >/dev/null 2>&1 && RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
 [ -z "$RAW_SIZE" ] && RAW_SIZE=$(dumpsys display 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | head -n 1)
@@ -331,27 +300,22 @@ fi
 [ "$ROWS" -lt 1 ] && ROWS=1
 
 SW=$W; SH=$H
-TOTAL_HEADERS=$((ROWS * HEADER_HEIGHT))
-USABLE_GAME_H=$((SH - STATUS_BAR_HEIGHT - TOTAL_HEADERS))
+USABLE_H=$((SH - TOP_OFFSET))
 
 GW=$((SW / COLS))
-GH=$((USABLE_GAME_H / ROWS))
+GH=$((USABLE_H / ROWS))
 
 printf "\n"
-log_status "Mode Grid Android 12: ${MODE_NAME} ${ROWS}x${COLS} (${COUNT} Aplikasi)"
+log_status "Mode Grid Android 12: ${MODE_NAME} ${ROWS}x${COLS} (${COUNT} Aplikasi - Tiap Jendela: ${GW}x${GH}px)"
 printf "---------------------------------------------------\n"
 
-# ==============================================================================
-# FASE 1: BUKA SETIAP APLIKASI ➔ UBAH KE FREEFORM ➔ RESIZE KE KUADRAN MASING-MASING
-# ==============================================================================
 idx=0
 for PKG in $SELECTED_PACKAGES; do
     row=$((idx / COLS))
     col=$((idx % COLS))
-    HEADER_OFFSET=$(((row + 1) * HEADER_HEIGHT))
     
     L=$((col * GW))
-    T=$((STATUS_BAR_HEIGHT + (row * GH) + HEADER_OFFSET))
+    T=$((TOP_OFFSET + (row * GH)))
     R=$(((col == COLS - 1) ? SW : (L + GW)))
     B=$(((row == ROWS - 1) ? SH : (T + GH)))
 
@@ -366,23 +330,17 @@ for PKG in $SELECTED_PACKAGES; do
     fi
     clean_and_inject_window_keys "$PREF" "$L" "$T" "$R" "$B" "/data/data/$PKG"
 
-    # Buka Aplikasi dengan am start & monkey
     am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" >/dev/null 2>&1
     monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 
     log_status "Menunggu $LAUNCH_DELAY detik agar aplikasi terbuka..."
     sleep "$LAUNCH_DELAY"
 
-    # Sentuh Recent ➔ Sentuh Logo (640, 96) ➔ Sentuh Freeform (928, 236) ➔ Langsung Kunci Grid
     do_manual_recents_freeform_a12 "$PKG" "$L" "$T" "$R" "$B"
 
     idx=$((idx+1))
 done
 
-# ==============================================================================
-# FASE AKHIR: MEMASTIKAN SELURUH JENDELA FOKUS DI DEPAN
-# ==============================================================================
-# Kembali ke Layar Utama (Home) 1x sebelum menyelaraskan seluruh jendela ke depan
 log_status "Menekan tombol Home (kembali ke layar utama)..."
 input keyevent 3 >/dev/null 2>&1
 sleep 1.5
@@ -393,9 +351,8 @@ idx=0
 for PKG in $SELECTED_PACKAGES; do
     row=$((idx / COLS))
     col=$((idx % COLS))
-    HEADER_OFFSET=$(((row + 1) * HEADER_HEIGHT))
     L=$((col * GW))
-    T=$((STATUS_BAR_HEIGHT + (row * GH) + HEADER_OFFSET))
+    T=$((TOP_OFFSET + (row * GH)))
     R=$(((col == COLS - 1) ? SW : (L + GW)))
     B=$(((row == ROWS - 1) ? SH : (T + GH)))
 
