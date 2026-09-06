@@ -90,19 +90,22 @@ do_manual_recents_freeform() {
     input tap 928 236 >/dev/null 2>&1
     sleep 2
 
-    # 4. Ambil Task ID & Terapkan Resize Bounds di OS (LOGIKA YANG WORK SEBELUMNYA)
-    TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${pkg_name}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
-    if [ -z "$TASK_ID" ]; then
-        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 5 "$pkg_name" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
+    # 4. Ambil Task ID & Terapkan Resize Bounds di OS
+    TASK_ID=$(dumpsys activity activities 2>/dev/null | grep -E "topResumedActivity|mResumedActivity|ResumedActivity" | grep -oE 't[0-9]+' | tr -d 't' | head -n 1)
+    if [ -z "$TASK_ID" ] || [ "$TASK_ID" = "0" ]; then
+        TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${pkg_name}|${pkg_name}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
+    fi
+    if [ -z "$TASK_ID" ] || [ "$TASK_ID" = "0" ]; then
+        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 2 "$pkg_name" | grep -oE 'Task\{[^}]*#[0-9]+' | grep -oE '#[0-9]+' | tr -d '#' | head -n 1)
     fi
 
-    if [ -n "$TASK_ID" ]; then
+    if [ -n "$TASK_ID" ] && [ "$TASK_ID" != "0" ]; then
         log_status "Menerapkan posisi Grid Task #${TASK_ID}: (${left},${top} -> ${right},${bottom})"
-        cmd activity set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
-        cmd activity resize-task "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
-        am task resize "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
-        am task resize "$TASK_ID" "${left},${top},${right},${bottom}" >/dev/null 2>&1
-        cmd activity focus-task "$TASK_ID" >/dev/null 2>&1
+        cmd activity task resize "$TASK_ID" "$left" "$top" "$right" "$bottom"
+        am task resize "$TASK_ID" "$left" "$top" "$right" "$bottom"
+        cmd activity task focus "$TASK_ID"
+    else
+        log_error "Task ID tidak terdeteksi untuk $pkg_name"
     fi
 }
 
@@ -359,12 +362,24 @@ done
 # ==============================================================================
 log_status "Menyelaraskan seluruh jendela Grid di layar..."
 sleep 1
+idx=0
 for PKG in $SELECTED_PACKAGES; do
-    TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${PKG}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
-    if [ -n "$TASK_ID" ]; then
-        cmd activity focus-task "$TASK_ID" >/dev/null 2>&1
-        am stack movetofront "$TASK_ID" >/dev/null 2>&1
+    row=$((idx / COLS))
+    col=$((idx % COLS))
+    HEADER_OFFSET=$(((row + 1) * HEADER_HEIGHT))
+    L=$((col * GW))
+    T=$((STATUS_BAR_HEIGHT + (row * GH) + HEADER_OFFSET))
+    R=$(((col == COLS - 1) ? SW : (L + GW)))
+    B=$(((row == ROWS - 1) ? SH : (T + GH)))
+
+    TASK_ID=$(dumpsys activity activities 2>/dev/null | grep "$PKG" | grep -oE 't[0-9]+' | tr -d 't' | head -n 1)
+    [ -z "$TASK_ID" ] && TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${PKG}|${PKG}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
+
+    if [ -n "$TASK_ID" ] && [ "$TASK_ID" != "0" ]; then
+        cmd activity task resize "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
+        cmd activity task focus "$TASK_ID" >/dev/null 2>&1
     fi
+    idx=$((idx+1))
 done
 
 echo "---------------------------------------------------"
