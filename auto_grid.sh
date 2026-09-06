@@ -1,5 +1,9 @@
 #!/system/bin/sh
 
+# Opsi Konfigurasi Cepat (Bisa diisi jika tidak ingin mengetik di terminal)
+APP_SELECTION=""
+APP_ORIENT=""
+
 STATUS_BAR_HEIGHT=20
 EXCLUDED_PREFIXES="android com.android. com.google.android. com.qualcomm. com.mediatek. com.sec.android. com.xiaomi. com.huawei. org.chromium."
 
@@ -12,28 +16,6 @@ NC='\033[0m'
 log_status() { printf "${CYAN}[*]${NC} %s\n" "$1"; }
 log_success() { printf "${GREEN}[+]${NC} %s\n" "$1"; }
 log_error() { printf "${RED}[!]${NC} %s\n" "$1"; }
-
-# Membaca input terminal (prioritas /dev/tty jika stdin dipiped/non-interaktif)
-read_input() {
-    prompt_msg="$1"
-    [ -n "$prompt_msg" ] && printf "%b" "$prompt_msg" >&2
-    
-    input_val=""
-    if [ -t 0 ]; then
-        read -r input_val
-    elif [ -c /dev/tty ] && (exec 3</dev/tty) 2>/dev/null; then
-        read -r input_val </dev/tty 2>/dev/null
-    else
-        read -r input_val 2>/dev/null
-    fi
-    
-    if [ $? -ne 0 ] || [ -z "$input_val" ]; then
-        echo "EOF"
-        return 1
-    fi
-    echo "$input_val"
-    return 0
-}
 
 # 1 Command Pasti: Injeksi SharedPreferences XML (Khusus Android 10 App Cloner)
 clean_and_inject_window_keys() {
@@ -124,6 +106,9 @@ ARG_SELECTION="$1"
 ARG_ORIENT="$2"
 ARG_OS="$3"
 
+[ -n "$APP_SELECTION" ] && [ -z "$ARG_SELECTION" ] && ARG_SELECTION="$APP_SELECTION"
+[ -n "$APP_ORIENT" ] && [ -z "$ARG_ORIENT" ] && ARG_ORIENT="$APP_ORIENT"
+
 log_status "Memindai aplikasi terpasang..."
 
 RAW_PACKAGES=$(pm list packages | cut -d':' -f2 | sort -u)
@@ -161,30 +146,17 @@ done
 echo "---------------------------------------------------"
 
 SELECTED_PACKAGES=""
-ATTEMPTS=0
 while [ -z "$SELECTED_PACKAGES" ]; do
     if [ -n "$ARG_SELECTION" ]; then
         USER_INPUT="$ARG_SELECTION"
     else
-        USER_INPUT=$(read_input "${CYAN}Masukkan nomor aplikasi (contoh: 30,31,32,33,34): ${NC}")
-    fi
-
-    # Cegah loop tak berujung jika stdin tertutup / non-interaktif
-    if [ "$USER_INPUT" = "EOF" ]; then
-        log_error "Input terminal tertutup (EOF) atau non-interaktif!"
-        log_error "Silakan jalankan perintah dengan menyertakan argumen, contoh:"
-        log_error "  sh setlayout.sh 1,2,3,4 H 12"
-        exit 1
+        printf "%b" "${CYAN}Masukkan nomor aplikasi (contoh: 30,31,32,33,34): ${NC}"
+        read -r USER_INPUT
     fi
     
     USER_INPUT_CLEAN=$(echo "$USER_INPUT" | tr -d ' \r\t')
 
     if [ -z "$USER_INPUT_CLEAN" ]; then
-        ATTEMPTS=$((ATTEMPTS + 1))
-        if [ "$ATTEMPTS" -ge 3 ]; then
-            log_error "Input kosong sebanyak 3 kali. Skrip dihentikan."
-            exit 1
-        fi
         log_error "Input tidak boleh kosong! Masukkan nomor aplikasi."
         ARG_SELECTION=""
         continue
@@ -197,7 +169,7 @@ while [ -z "$SELECTED_PACKAGES" ]; do
     for num in $USER_CHOICE; do
         num_clean=$(echo "$num" | tr -cd '0-9')
         if [ -n "$num_clean" ] && [ "$num_clean" -ge 1 ] && [ "$num_clean" -le "$TOTAL_FOUND" ]; then
-            # Pencarian item ke-num_clean murni shell (tidak butuh awk)
+            # Pencarian nomor murni shell tanpa dependensi awk
             curr_n=1
             val=""
             for pkg_item in $ARRAY_CLONES; do
@@ -223,11 +195,6 @@ while [ -z "$SELECTED_PACKAGES" ]; do
     if [ "$VALID" -eq 1 ] && [ -n "$TMP_SELECTION" ]; then
         SELECTED_PACKAGES=$TMP_SELECTION
     else
-        ATTEMPTS=$((ATTEMPTS + 1))
-        if [ "$ATTEMPTS" -ge 3 ]; then
-            log_error "Input salah sebanyak 3 kali. Skrip dihentikan."
-            exit 1
-        fi
         log_error "Input tidak valid! Masukkan nomor aplikasi yang tersedia."
         ARG_SELECTION=""
     fi
@@ -246,10 +213,8 @@ while [ -z "$ORIENT_CHOICE" ]; do
     if [ -n "$ARG_ORIENT" ]; then
         ORIENT_INPUT="$ARG_ORIENT"
     else
-        ORIENT_INPUT=$(read_input "${CYAN}Pilih Orientasi Layar [H] Horizontal / [V] Vertical: ${NC}")
-        if [ "$ORIENT_INPUT" = "EOF" ]; then
-            ORIENT_INPUT="H"
-        fi
+        printf "%b" "${CYAN}Pilih Orientasi Layar [H] Horizontal / [V] Vertical: ${NC}"
+        read -r ORIENT_INPUT
     fi
     
     INPUT_CLEAN=$(echo "$ORIENT_INPUT" | tr -d ' \r\t' | tr '[:lower:]' '[:upper:]')
