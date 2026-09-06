@@ -2,7 +2,7 @@
 
 STATUS_BAR_HEIGHT=20
 HEADER_HEIGHT=36
-LAUNCH_DELAY=8
+LAUNCH_DELAY=10
 
 EXCLUDED_PREFIXES="android com.android. com.google.android. com.qualcomm. com.mediatek. com.sec.android. com.xiaomi. com.huawei. org.chromium."
 
@@ -69,6 +69,12 @@ clean_and_inject_window_keys() {
 }
 
 do_manual_recents_freeform() {
+    pkg_name="$1"
+    left="$2"
+    top="$3"
+    right="$4"
+    bottom="$5"
+
     # 1. Buka Recent Apps (KEYCODE_APP_SWITCH = 187)
     log_status "1. Menekan Recent Apps..."
     input keyevent 187 >/dev/null 2>&1
@@ -83,51 +89,21 @@ do_manual_recents_freeform() {
     log_status "3. Menekan tombol Freeform (X: 928, Y: 236)..."
     input tap 928 236 >/dev/null 2>&1
     sleep 2
-}
 
-get_task_id_safe() {
-    _pkg="$1"
-    _tid=""
-    
-    # 1. Ekstrak Task ID dari Task{... #ID ...} pada dumpsys activity recents
-    _tid=$(timeout 2 dumpsys activity recents 2>/dev/null | grep "$_pkg" | grep -oE 'Task\{[^}]*#[0-9]+' | grep -oE '#[0-9]+' | tr -d '#' | head -n 1)
-    
-    # 2. Coba baris affinity / realActivity di recents
-    if [ -z "$_tid" ]; then
-        _tid=$(timeout 2 dumpsys activity recents 2>/dev/null | grep -B 2 "$_pkg" | grep -oE 'Task\{[^}]*#[0-9]+' | grep -oE '#[0-9]+' | tr -d '#' | head -n 1)
-    fi
-    
-    # 3. dumpsys activity activities
-    if [ -z "$_tid" ]; then
-        _tid=$(timeout 2 dumpsys activity activities 2>/dev/null | grep "$_pkg" | grep -oE 'Task\{[^}]*#[0-9]+' | grep -oE '#[0-9]+' | tr -d '#' | head -n 1)
+    # 4. Ambil Task ID & Terapkan Resize Bounds di OS (LOGIKA YANG WORK SEBELUMNYA)
+    TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${pkg_name}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
+    if [ -z "$TASK_ID" ]; then
+        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 5 "$pkg_name" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
     fi
 
-    # 4. Fallback id=xxx
-    if [ -z "$_tid" ]; then
-        _tid=$(timeout 2 dumpsys activity recents 2>/dev/null | grep -B 2 "$_pkg" | grep -oE 'id=[0-9]+' | head -n 1 | cut -d'=' -f2)
+    if [ -n "$TASK_ID" ]; then
+        log_status "Menerapkan posisi Grid Task #${TASK_ID}: (${left},${top} -> ${right},${bottom})"
+        cmd activity set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
+        cmd activity resize-task "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
+        am task resize "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
+        am task resize "$TASK_ID" "${left},${top},${right},${bottom}" >/dev/null 2>&1
+        cmd activity focus-task "$TASK_ID" >/dev/null 2>&1
     fi
-    
-    echo "$_tid"
-}
-
-resize_task_safe() {
-    _tid="$1"
-    _l="$2"
-    _t="$3"
-    _r="$4"
-    _b="$5"
-    
-    [ -z "$_tid" ] && return 1
-    [ "$_tid" = "0" ] && return 1
-
-    log_status "Menerapkan ukuran Grid ke Task #${_tid}: (${_l},${_t} -> ${_r},${_b})"
-
-    cmd activity set-windowing-mode "$_tid" 5 >/dev/null 2>&1
-    am task resize "$_tid" "${_l},${_t},${_r},${_b}" >/dev/null 2>&1
-    am task resize "$_tid" "$_l $_t $_r $_b" >/dev/null 2>&1
-    cmd activity task resize "$_tid" "${_l},${_t},${_r},${_b}" >/dev/null 2>&1
-    cmd activity focus-task "$_tid" >/dev/null 2>&1
-    am stack movetofront "$_tid" >/dev/null 2>&1
 }
 
 read_input_safe() {
@@ -369,60 +345,26 @@ for PKG in $SELECTED_PACKAGES; do
     am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" >/dev/null 2>&1
     monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 
-    log_status "Menunggu 8 detik agar aplikasi terbuka..."
+    log_status "Menunggu $LAUNCH_DELAY detik agar aplikasi terbuka..."
     sleep "$LAUNCH_DELAY"
 
-    # Sentuh Recent ➔ Sentuh Logo (640, 96) ➔ Sentuh Freeform (928, 236)
-    do_manual_recents_freeform
+    # Sentuh Recent ➔ Sentuh Logo (640, 96) ➔ Sentuh Freeform (928, 236) ➔ Langsung Kunci Grid
+    do_manual_recents_freeform "$PKG" "$L" "$T" "$R" "$B"
 
     idx=$((idx+1))
 done
 
 # ==============================================================================
-# FASE 2: TEKAN TOMBOL HOME 1X
+# FASE AKHIR: MEMASTIKAN SELURUH JENDELA FOKUS DI DEPAN
 # ==============================================================================
-log_status "Semua aplikasi sudah Freeform. Menekan tombol Home 1x..."
-input keyevent 3 >/dev/null 2>&1
-sleep 2
-
-# ==============================================================================
-# FASE 3: BUKA KEMBALI SETIAP APLIKASI DARI NOMOR 1 & TERAPKAN RESIZE GRID
-# ==============================================================================
-log_status "Membuka kembali masing-masing aplikasi mulai dari nomor 1..."
-
-idx=0
+log_status "Menyelaraskan seluruh jendela Grid di layar..."
+sleep 1
 for PKG in $SELECTED_PACKAGES; do
-    row=$((idx / COLS))
-    col=$((idx % COLS))
-    HEADER_OFFSET=$(((row + 1) * HEADER_HEIGHT))
-    
-    L=$((col * GW))
-    T=$((STATUS_BAR_HEIGHT + (row * GH) + HEADER_OFFSET))
-    R=$(((col == COLS - 1) ? SW : (L + GW)))
-    B=$(((row == ROWS - 1) ? SH : (T + GH)))
-
-    printf "${GREEN}[%d/%d]${NC} Membuka Jendela Grid #%d -> %s\n" "$((idx+1))" "$COUNT" "$((idx+1))" "$PKG"
-
-    # Injeksi ulang koordinat ke SharedPreferences agar sinkron
-    PREF_DIR="/data/data/$PKG/shared_prefs"
-    PREF="$PREF_DIR/${PKG}_preferences.xml"
-    clean_and_inject_window_keys "$PREF" "$L" "$T" "$R" "$B" "/data/data/$PKG"
-
-    # Buka Aplikasi (langsung muncul dalam mode Freeform di posisi Grid)
-    am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" >/dev/null 2>&1
-    monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-    sleep 2
-
-    # Ambil Task ID secara aman (anti-freeze) dan kunci ukuran grid
-    TASK_ID=$(get_task_id_safe "$PKG")
-    if [ -n "$TASK_ID" ] && [ "$TASK_ID" != "0" ]; then
-        resize_task_safe "$TASK_ID" "$L" "$T" "$R" "$B"
-    else
-        log_status "Menerapkan resize bounds langsung ke task aktif..."
-        am task resize "$PKG" "${L},${T},${R},${B}" >/dev/null 2>&1
+    TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${PKG}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
+    if [ -n "$TASK_ID" ]; then
+        cmd activity focus-task "$TASK_ID" >/dev/null 2>&1
+        am stack movetofront "$TASK_ID" >/dev/null 2>&1
     fi
-
-    idx=$((idx+1))
 done
 
 echo "---------------------------------------------------"
