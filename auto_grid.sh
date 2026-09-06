@@ -35,7 +35,33 @@ clean_and_inject_window_keys() {
 
 launch_app() {
     pkg_name="$1"
-    monkey -p "$pkg_name" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+    
+    # 1. Cari Main Activity component dari package
+    COMP=""
+    if command -v cmd >/dev/null 2>&1; then
+        COMP=$(cmd package resolve-activity --brief "$pkg_name" 2>/dev/null | tail -n 1 | grep -v "No activity found" | tr -d '\r')
+    fi
+
+    LAUNCHED=0
+    # 2. Coba am start dengan --windowingMode 5 (Android 12 Direct Freeform Launch)
+    if [ -n "$COMP" ] && [ "$COMP" != "${COMP#*/}" ]; then
+        am start --windowingMode 5 -n "$COMP" >/dev/null 2>&1 && LAUNCHED=1
+    fi
+
+    # 3. Coba Intent Launcher dengan --windowingMode 5
+    if [ "$LAUNCHED" -eq 0 ]; then
+        am start --windowingMode 5 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$pkg_name" >/dev/null 2>&1 && LAUNCHED=1
+    fi
+
+    # 4. Coba cmd activity start-activity --windowingMode 5
+    if [ "$LAUNCHED" -eq 0 ] && command -v cmd >/dev/null 2>&1; then
+        cmd activity start-activity --windowingMode 5 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$pkg_name" >/dev/null 2>&1 && LAUNCHED=1
+    fi
+
+    # 5. Fallback ke monkey jika am start tidak didukung
+    if [ "$LAUNCHED" -eq 0 ]; then
+        monkey -p "$pkg_name" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+    fi
 }
 
 read_input_safe() {
@@ -178,7 +204,19 @@ while [ -z "$ORIENT_CHOICE" ]; do
     fi
 done
 
-RAW_SIZE=$(wm size | awk '{print $3}')
+RAW_SIZE=""
+if command -v wm >/dev/null 2>&1; then
+    RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
+fi
+
+if [ -z "$RAW_SIZE" ] && command -v dumpsys >/dev/null 2>&1; then
+    RAW_SIZE=$(dumpsys display 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | head -n 1)
+fi
+
+if [ -z "$RAW_SIZE" ]; then
+    RAW_SIZE="1280x720"
+fi
+
 DIM1=$(echo "$RAW_SIZE" | cut -d'x' -f1)
 DIM2=$(echo "$RAW_SIZE" | cut -d'x' -f2)
 
@@ -273,4 +311,4 @@ for PKG in $SELECTED_PACKAGES; do
 done
 
 echo "---------------------------------------------------"
-log_success "SELESAI! ${COUNT} aplikasi terbuka di Grid ${MODE_NAME}."
+log_success "SELESAI! ${COUNT} aplikasi terbuka di Grid ${MODE_NAME} (Android 12 Direct Freeform Support)."
