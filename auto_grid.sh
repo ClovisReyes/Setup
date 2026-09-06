@@ -2,7 +2,7 @@
 
 STATUS_BAR_HEIGHT=20
 HEADER_HEIGHT=36
-LAUNCH_DELAY=3
+LAUNCH_DELAY=2
 
 EXCLUDED_PREFIXES="android com.android. com.google.android. com.qualcomm. com.mediatek. com.sec.android. com.xiaomi. com.huawei. org.chromium."
 
@@ -65,42 +65,6 @@ clean_and_inject_window_keys() {
     chmod 777 "$pref_dir" >/dev/null 2>&1
     if [ -n "$APP_OWNER" ]; then
         chown -R "$APP_OWNER" "$pref_dir" >/dev/null 2>&1
-    fi
-}
-
-launch_app() {
-    pkg_name="$1"
-    left="$2"
-    top="$3"
-    right="$4"
-    bottom="$5"
-    
-    # 1. Buka aplikasi via am start launcher intent
-    am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$pkg_name" >/dev/null 2>&1
-    monkey -p "$pkg_name" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-
-    # 2. Deteksi Task ID aplikasi
-    sleep 1
-    TASK_ID=""
-    if command -v dumpsys >/dev/null 2>&1; then
-        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 3 "$pkg_name" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
-        if [ -z "$TASK_ID" ]; then
-            TASK_ID=$(dumpsys activity activities 2>/dev/null | grep -B 5 "$pkg_name" | grep -oE 'Task\{[a-f0-9]+ #[0-9]+' | grep -oE '[0-9]+$' | head -n 1)
-        fi
-    fi
-
-    # 3. Ubah ke mode Freeform (5) & Resize Task Bounds langsung di OS WindowManager Android 12
-    if [ -n "$TASK_ID" ]; then
-        cmd activity set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
-        am stack set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
-        am task set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
-
-        # Resize Task Bounds ke ukuran (left, top, right, bottom)
-        cmd activity resize-task "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
-        am task resize "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
-        
-        cmd activity focus-task "$TASK_ID" >/dev/null 2>&1
-        am stack movetofront "$TASK_ID" >/dev/null 2>&1
     fi
 }
 
@@ -314,6 +278,11 @@ GH=$((USABLE_GAME_H / ROWS))
 
 log_status "Mode Grid: ${MODE_NAME} ${ROWS}x${COLS} (${COUNT} Aplikasi)"
 
+# ==============================================================================
+# FASE 1: MEMBUKA SELURUH APLIKASI 1-4 & MENGUBAH KE MODE FREEFORM
+# ==============================================================================
+log_status "FASE 1: Membuka Aplikasi 1-4 & Mengubah Semuanya ke Mode Freeform..."
+
 idx=0
 for PKG in $SELECTED_PACKAGES; do
     PREF_DIR="/data/data/$PKG/shared_prefs"
@@ -321,7 +290,6 @@ for PKG in $SELECTED_PACKAGES; do
     
     row=$((idx / COLS))
     col=$((idx % COLS))
-    
     HEADER_OFFSET=$(((row + 1) * HEADER_HEIGHT))
     
     L=$((col * GW))
@@ -329,33 +297,74 @@ for PKG in $SELECTED_PACKAGES; do
     R=$(((col == COLS - 1) ? SW : (L + GW)))
     B=$(((row == ROWS - 1) ? SH : (T + GH)))
 
-    printf "${GREEN}[%d/%d]${NC} Setup Grid Layout -> %s\n" "$((idx+1))" "$COUNT" "$PKG"
+    printf "${GREEN}[1/2 - %d/%d]${NC} Buka & Set Freeform -> %s\n" "$((idx+1))" "$COUNT" "$PKG"
     
     am force-stop "$PKG" >/dev/null 2>&1
-    sleep 1
     
     mkdir -p "$PREF_DIR" >/dev/null 2>&1
     if [ ! -f "$PREF" ]; then
         echo '<?xml version="1.0" encoding="utf-8" standalone="yes"?>' > "$PREF"
-        echo '<map>' >> "$PREF"
-        echo '</map>' >> "$PREF"
+        echo '<map></map>' >> "$PREF"
     fi
 
     clean_and_inject_window_keys "$PREF" "$L" "$T" "$R" "$B" "/data/data/$PKG"
 
-    sleep 1
-    launch_app "$PKG" "$L" "$T" "$R" "$B"
+    # Launch aplikasi (Langkah 1-4 manual)
+    am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" >/dev/null 2>&1
+    monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+    sleep 2
 
-    log_status "Jeda ${LAUNCH_DELAY} detik..."
-    sleep "$LAUNCH_DELAY"
+    # Deteksi Task ID
+    TASK_ID=""
+    if command -v dumpsys >/dev/null 2>&1; then
+        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 3 "$PKG" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
+        if [ -z "$TASK_ID" ]; then
+            TASK_ID=$(dumpsys activity activities 2>/dev/null | grep -B 5 "$PKG" | grep -oE 'Task\{[a-f0-9]+ #[0-9]+' | grep -oE '[0-9]+$' | head -n 1)
+        fi
+    fi
+
+    # Set Windowing Mode ke Freeform (5) & Resize Bounds
+    if [ -n "$TASK_ID" ]; then
+        cmd activity set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
+        am stack set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
+        am task set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
+        cmd activity resize-task "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
+        am task resize "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
+    fi
 
     idx=$((idx+1))
 done
 
-# Menutup tampilan Recent Apps Overview agar semua jendela floating aktif di layar depan
-log_status "Keluar dari Recent Apps & mengaktifkan Floating Grid..."
-sleep 1
+# ==============================================================================
+# FASE 2: MEMENSET KEMBALI APLIKASI 1-4 YANG SUDAH DALAM MODE FREEFORM
+# ==============================================================================
+log_status "FASE 2: Memenget Kembali Aplikasi 1-4 yang Sudah di Freeform..."
+
+# Tekan HOME untuk keluar dari Recent Apps
 input keyevent 3 >/dev/null 2>&1
+sleep 1
+
+idx=0
+for PKG in $SELECTED_PACKAGES; do
+    printf "${GREEN}[2/2 - %d/%d]${NC} Membuka Kembali (Pencet Ulang) -> %s\n" "$((idx+1))" "$COUNT" "$PKG"
+    
+    TASK_ID=""
+    if command -v dumpsys >/dev/null 2>&1; then
+        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 3 "$PKG" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
+    fi
+
+    # Mencet ulang aplikasi 1,2,3,4 yang sudah di-freeform
+    am start --windowingMode 5 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" >/dev/null 2>&1
+    monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+    
+    if [ -n "$TASK_ID" ]; then
+        cmd activity focus-task "$TASK_ID" >/dev/null 2>&1
+        am stack movetofront "$TASK_ID" >/dev/null 2>&1
+    fi
+    
+    sleep 1
+    idx=$((idx+1))
+done
 
 echo "---------------------------------------------------"
-log_success "SELESAI! ${COUNT} aplikasi terbuka di Grid ${MODE_NAME}."
+log_success "SELESAI! ${COUNT} aplikasi melayang aktif di Grid ${MODE_NAME}."
