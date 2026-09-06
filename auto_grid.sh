@@ -148,13 +148,12 @@ read_input_safe() {
     [ -n "$prompt_msg" ] && printf "%b" "$prompt_msg" >&2
     
     input_val=""
-    if read -r input_val 2>/dev/null; then
-        echo "$input_val"
-        return 0
+    if [ -c /dev/tty ]; then
+        read -r input_val </dev/tty 2>/dev/null
     else
-        echo "EOF_DETECTED"
-        return 1
+        read -r input_val 2>/dev/null
     fi
+    echo "$input_val"
 }
 
 ARG_SELECTION="$1"
@@ -199,17 +198,14 @@ while [ -z "$SELECTED_PACKAGES" ]; do
     if [ -n "$ARG_SELECTION" ]; then
         USER_INPUT="$ARG_SELECTION"
     else
-        USER_INPUT=$(read_input_safe "${CYAN}Masukkan nomor aplikasi (contoh: 30,31,32,33,34): ${NC}")
-        if [ "$USER_INPUT" = "EOF_DETECTED" ]; then
-            log_error "Input tertutup. Gunakan: sh setlayout_a12.sh <nomor> <H/V>"
-            exit 1
-        fi
+        USER_INPUT=$(read_input_safe "${CYAN}Masukkan nomor aplikasi (contoh: 8,9,10,11): ${NC}")
     fi
     
     USER_INPUT_CLEAN=$(echo "$USER_INPUT" | tr -cd '0-9,')
     if [ -z "$USER_INPUT_CLEAN" ]; then
-        log_error "Input tidak boleh kosong!"
+        log_error "Input tidak boleh kosong! Masukkan nomor aplikasi (contoh: 8,9,10,11)."
         ARG_SELECTION=""
+        sleep 0.5
         continue
     fi
 
@@ -229,15 +225,21 @@ while [ -z "$SELECTED_PACKAGES" ]; do
     done
     
     if [ "$VALID" -eq 1 ] && [ -n "$TMP_SELECTION" ]; then
-        SELECTED_PACKAGES=$TMP_SELECTION
+        SELECTED_PACKAGES=$(echo "$TMP_SELECTION" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
     else
-        log_error "Nomor aplikasi tidak valid!"
+        log_error "Nomor aplikasi tidak valid! Pilih nomor antara 1 sampai $TOTAL_FOUND."
         ARG_SELECTION=""
+        sleep 0.5
     fi
 done
 
 COUNT=0
 for p in $SELECTED_PACKAGES; do COUNT=$((COUNT+1)); done
+
+if [ "$COUNT" -eq 0 ]; then
+    log_error "Tidak ada aplikasi yang dipilih. Keluar."
+    exit 1
+fi
 
 ORIENT_CHOICE=""
 while [ -z "$ORIENT_CHOICE" ]; do
@@ -245,22 +247,20 @@ while [ -z "$ORIENT_CHOICE" ]; do
         ORIENT_INPUT="$ARG_ORIENT"
     else
         ORIENT_INPUT=$(read_input_safe "${CYAN}Pilih Orientasi Layar [H] Horizontal / [V] Vertical (Default H): ${NC}")
-        [ "$ORIENT_INPUT" = "EOF_DETECTED" ] && ORIENT_INPUT="H"
     fi
     
-    # Bersihkan dari seluruh control code, escape code (^[\x1b), dan ambil huruf saja
     INPUT_CLEAN=$(echo "$ORIENT_INPUT" | tr -cd 'a-zA-Z' | tr '[:lower:]' '[:upper:]')
     case "$INPUT_CLEAN" in
         *V*)
             ORIENT_CHOICE="V"
             ;;
         *H*|"")
-            # Jika user ketik H/h atau langsung tekan ENTER, pilih Horizontal
             ORIENT_CHOICE="H"
             ;;
         *)
             log_error "Pilihan tidak valid! Masukkan H atau V."
             ARG_ORIENT=""
+            sleep 0.5
             ;;
     esac
 done
@@ -287,6 +287,7 @@ if [ "$ORIENT_CHOICE" = "V" ]; then
     W=$MIN_DIM
     H=$MAX_DIM
     case $COUNT in
+        1) COLS=1; ROWS=1 ;;
         2) COLS=1; ROWS=2 ;;
         3) COLS=1; ROWS=3 ;;
         4) COLS=2; ROWS=2 ;;
@@ -300,6 +301,7 @@ else
     W=$MAX_DIM
     H=$MIN_DIM
     case $COUNT in
+        1) COLS=1; ROWS=1 ;;
         2) COLS=2; ROWS=1 ;;
         3) COLS=3; ROWS=1 ;;
         4) COLS=2; ROWS=2 ;;
@@ -309,6 +311,9 @@ else
         *) COLS=4; ROWS=$(((COUNT + COLS - 1) / COLS)) ;;
     esac
 fi
+
+[ "$COLS" -lt 1 ] && COLS=1
+[ "$ROWS" -lt 1 ] && ROWS=1
 
 SW=$W; SH=$H
 TOTAL_HEADERS=$((ROWS * HEADER_HEIGHT))
