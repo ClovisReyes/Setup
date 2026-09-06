@@ -86,14 +86,16 @@ do_manual_recents_freeform() {
     input tap 928 236 >/dev/null 2>&1
     sleep 2
 
-    # 4. Ambil Task ID & Resize Bounds presisi
+    # 4. Ambil Task ID & Terapkan Resize Bounds di OS
     TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${pkg_name}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
     if [ -z "$TASK_ID" ]; then
         TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 5 "$pkg_name" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
     fi
 
     if [ -n "$TASK_ID" ]; then
+        cmd activity set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
         cmd activity resize-task "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
+        am task resize "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
     fi
 }
 
@@ -308,7 +310,7 @@ GH=$((USABLE_GAME_H / ROWS))
 log_status "Mode Grid: ${MODE_NAME} ${ROWS}x${COLS} (${COUNT} Aplikasi)"
 
 # ==============================================================================
-# ALUR OTOMATIS DENGAN KOORDINAT PRESISI KOORDINAT LOGO (640, 96) & FREEFORM (928, 236)
+# FASE 1: BUKA SETIAP APLIKASI ➔ RECENT ➔ LOGO (640, 96) ➔ FREEFORM (928, 236)
 # ==============================================================================
 idx=0
 for PKG in $SELECTED_PACKAGES; do
@@ -324,7 +326,7 @@ for PKG in $SELECTED_PACKAGES; do
     R=$(((col == COLS - 1) ? SW : (L + GW)))
     B=$(((row == ROWS - 1) ? SH : (T + GH)))
 
-    printf "${GREEN}[%d/%d]${NC} Memproses -> %s\n" "$((idx+1))" "$COUNT" "$PKG"
+    printf "${GREEN}[%d/%d]${NC} Memproses Freeform -> %s\n" "$((idx+1))" "$COUNT" "$PKG"
     
     am force-stop "$PKG" >/dev/null 2>&1
     sleep 1
@@ -351,5 +353,38 @@ for PKG in $SELECTED_PACKAGES; do
     idx=$((idx+1))
 done
 
+# ==============================================================================
+# FASE 2: MERAPIKAN SELURUH POSISI GRID & FOKUS JENDELA KE DEPAN
+# ==============================================================================
+log_status "Merapikan dan menata posisi seluruh jendela Grid 2x2..."
+sleep 1
+
+idx=0
+for PKG in $SELECTED_PACKAGES; do
+    row=$((idx / COLS))
+    col=$((idx % COLS))
+    HEADER_OFFSET=$(((row + 1) * HEADER_HEIGHT))
+    
+    L=$((col * GW))
+    T=$((STATUS_BAR_HEIGHT + (row * GH) + HEADER_OFFSET))
+    R=$(((col == COLS - 1) ? SW : (L + GW)))
+    B=$(((row == ROWS - 1) ? SH : (T + GH)))
+
+    TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${PKG}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
+    if [ -z "$TASK_ID" ]; then
+        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 5 "$PKG" | grep -oE 'taskId=[0-9]+' | head -n 1 | cut -d'=' -f2)
+    fi
+
+    if [ -n "$TASK_ID" ]; then
+        cmd activity set-windowing-mode "$TASK_ID" 5 >/dev/null 2>&1
+        cmd activity resize-task "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
+        am task resize "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
+        cmd activity focus-task "$TASK_ID" >/dev/null 2>&1
+        am stack movetofront "$TASK_ID" >/dev/null 2>&1
+    fi
+    sleep 0.5
+    idx=$((idx+1))
+done
+
 echo "---------------------------------------------------"
-log_success "SELESAI! ${COUNT} aplikasi melayang aktif di Grid ${MODE_NAME}."
+log_success "SELESAI! ${COUNT} aplikasi melayang aktif & tertata rapi di Grid ${MODE_NAME}."
