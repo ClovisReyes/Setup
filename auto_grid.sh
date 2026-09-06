@@ -146,17 +146,34 @@ done
 echo "---------------------------------------------------"
 
 SELECTED_PACKAGES=""
+ATTEMPTS=0
 while [ -z "$SELECTED_PACKAGES" ]; do
     if [ -n "$ARG_SELECTION" ]; then
         USER_INPUT="$ARG_SELECTION"
     else
         printf "%b" "${CYAN}Masukkan nomor aplikasi (contoh: 30,31,32,33,34): ${NC}"
-        read -r USER_INPUT
+        # Membaca dari /dev/tty jika dijalankan melalui piping (curl ... | sh)
+        if [ -t 0 ]; then
+            read -r USER_INPUT
+        elif [ -r /dev/tty ]; then
+            read -r USER_INPUT < /dev/tty
+        else
+            read -r USER_INPUT
+        fi
     fi
     
     USER_INPUT_CLEAN=$(echo "$USER_INPUT" | tr -d ' \r\t')
 
     if [ -z "$USER_INPUT_CLEAN" ]; then
+        ATTEMPTS=$((ATTEMPTS + 1))
+        if [ "$ATTEMPTS" -ge 3 ]; then
+            log_error "Input kosong sebanyak 3 kali atau terminal tidak terhubung."
+            log_status "Tips: Jalankan via download file terlebih dahulu:"
+            log_status "  curl -sL <RAW_URL> -o setlayout.sh && sh setlayout.sh"
+            log_status "Atau berikan nomor aplikasi langsung:"
+            log_status "  sh setlayout.sh 1,2,3 H 12"
+            exit 1
+        fi
         log_error "Input tidak boleh kosong! Masukkan nomor aplikasi."
         ARG_SELECTION=""
         continue
@@ -195,6 +212,11 @@ while [ -z "$SELECTED_PACKAGES" ]; do
     if [ "$VALID" -eq 1 ] && [ -n "$TMP_SELECTION" ]; then
         SELECTED_PACKAGES=$TMP_SELECTION
     else
+        ATTEMPTS=$((ATTEMPTS + 1))
+        if [ "$ATTEMPTS" -ge 3 ]; then
+            log_error "Input salah sebanyak 3 kali. Skrip dihentikan."
+            exit 1
+        fi
         log_error "Input tidak valid! Masukkan nomor aplikasi yang tersedia."
         ARG_SELECTION=""
     fi
@@ -209,12 +231,20 @@ if [ "$COUNT" -le 0 ]; then
 fi
 
 ORIENT_CHOICE=""
+ATTEMPTS_ORIENT=0
 while [ -z "$ORIENT_CHOICE" ]; do
     if [ -n "$ARG_ORIENT" ]; then
         ORIENT_INPUT="$ARG_ORIENT"
     else
         printf "%b" "${CYAN}Pilih Orientasi Layar [H] Horizontal / [V] Vertical: ${NC}"
-        read -r ORIENT_INPUT
+        # Membaca dari /dev/tty jika dijalankan melalui piping (curl ... | sh)
+        if [ -t 0 ]; then
+            read -r ORIENT_INPUT
+        elif [ -r /dev/tty ]; then
+            read -r ORIENT_INPUT < /dev/tty
+        else
+            read -r ORIENT_INPUT
+        fi
     fi
     
     INPUT_CLEAN=$(echo "$ORIENT_INPUT" | tr -d ' \r\t' | tr '[:lower:]' '[:upper:]')
@@ -222,6 +252,12 @@ while [ -z "$ORIENT_CHOICE" ]; do
     if [ "$INPUT_CLEAN" = "H" ] || [ "$INPUT_CLEAN" = "V" ]; then
         ORIENT_CHOICE=$INPUT_CLEAN
     else
+        ATTEMPTS_ORIENT=$((ATTEMPTS_ORIENT + 1))
+        if [ "$ATTEMPTS_ORIENT" -ge 3 ]; then
+            log_status "Menggunakan orientasi default: Horizontal [H]..."
+            ORIENT_CHOICE="H"
+            break
+        fi
         log_error "Input tidak valid! Pilih H atau V."
         ARG_ORIENT=""
     fi
@@ -378,7 +414,7 @@ else
     log_status "HEADER_HEIGHT: Dihapus / Tidak digunakan (Native AOSP Freeform)"
 
     # --------------------------------------------------------------------------
-    # FASE 1 (Android 12): BUKA APLIKASI ➔ RECENT ➔ FREEFORM ➔ RESIZE TASK
+    # FASE 1 (Android 12): BUKA APLIKASI -> RECENT -> FREEFORM -> RESIZE TASK
     # --------------------------------------------------------------------------
     idx=0
     for PKG in $SELECTED_PACKAGES; do
@@ -399,7 +435,7 @@ else
         log_status "Menunggu $LAUNCH_DELAY detik agar aplikasi terbuka..."
         sleep "$LAUNCH_DELAY"
 
-        # Sentuh Recent ➔ Sentuh Logo (640, 96) ➔ Sentuh Freeform (928, 236) ➔ Kunci Grid Resize
+        # Sentuh Recent -> Sentuh Logo (640, 96) -> Sentuh Freeform (928, 236) -> Kunci Grid Resize
         do_manual_recents_freeform "$PKG" "$L" "$T" "$R" "$B"
 
         idx=$((idx+1))
