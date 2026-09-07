@@ -1,7 +1,7 @@
 #!/system/bin/sh
 
 STATUS_BAR_HEIGHT=20
-HEADER_HEIGHT=35
+HEADER_HEIGHT=36
 LAUNCH_DELAY=5
 
 EXCLUDED_PREFIXES="android com.android. com.google.android. com.qualcomm. com.mediatek. com.sec.android. com.xiaomi. com.huawei. org.chromium."
