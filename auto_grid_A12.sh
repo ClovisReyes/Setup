@@ -99,8 +99,8 @@ do_manual_recents_freeform_a12() {
     input tap 640 96 >/dev/null 2>&1
     sleep 1.5
 
-    log_status "3. Menekan tombol Freeform (X: 753, Y: 202)..."
-    input tap 753 202 >/dev/null 2>&1
+    log_status "3. Menekan tombol Freeform (X: 928, Y: 236)..."
+    input tap 928 236 >/dev/null 2>&1
     sleep 2
 
     TASK_ID=$(dumpsys activity activities 2>/dev/null | grep -E "topResumedActivity|mResumedActivity|ResumedActivity" | grep -oE '(taskId=[0-9]+|t[0-9]+)' | grep -oE '[0-9]+' | head -n 1)
