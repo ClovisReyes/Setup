@@ -1,0 +1,425 @@
+#!/system/bin/sh
+# ==============================================================================
+# SCRIPT : setlayout_a10.sh
+# TARGET : Android 10 (Q - API 29) Cloud Phone / Emulator
+# DESKRIPSI : Otomatisasi Grid Layout & Freeform Window khusus Android 10
+#              (Menu Manual Interaktif: Pilihan Aplikasi & Orientasi H/V)
+# ==============================================================================
+
+STATUS_BAR_HEIGHT=20
+HEADER_HEIGHT=35
+LAUNCH_DELAY=10
+
+EXCLUDED_PREFIXES="android com.android. com.google.android. com.qualcomm. com.mediatek. com.sec.android. com.xiaomi. com.huawei. org.chromium."
+
+CYAN='\033[0;36m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+log_status() { printf "${CYAN}[*]${NC} %s\n" "$1"; }
+log_success() { printf "${GREEN}[+]${NC} %s\n" "$1"; }
+log_error() { printf "${RED}[!]${NC} %s\n" "$1"; }
+
+# ------------------------------------------------------------------------------
+# 1. AKTIFKAN PENGATURAN FREEFORM KHUSUS ANDROID 10
+# ------------------------------------------------------------------------------
+log_status "Mengaktifkan dukungan Freeform Multi-Window Android 10..."
+settings put global enable_freeform_support 1 >/dev/null 2>&1
+settings put global force_resizable_activities 1 >/dev/null 2>&1
+settings put global freeform_window_management 1 >/dev/null 2>&1
+setprop persist.sys.debug.freeform_window 1 >/dev/null 2>&1
+setprop persist.sys.debug.force_resizable 1 >/dev/null 2>&1
+
+# ------------------------------------------------------------------------------
+# 2. INJEKSI PREFERENSI WINDOW APP CLONER (SHARED PREFS XML)
+# ------------------------------------------------------------------------------
+clean_and_inject_window_keys() {
+    xml_file="$1"
+    left="$2"
+    top="$3"
+    right="$4"
+    bottom="$5"
+    pkg_dir="$6"
+
+    APP_OWNER=""
+    if [ -d "$pkg_dir" ]; then
+        APP_OWNER=$(stat -c '%u:%g' "$pkg_dir" 2>/dev/null)
+        [ -z "$APP_OWNER" ] && APP_OWNER=$(ls -ld "$pkg_dir" 2>/dev/null | awk '{print $3":"$4}')
+    fi
+
+    pref_dir=$(dirname "$xml_file")
+    mkdir -p "$pref_dir" >/dev/null 2>&1
+    chmod 777 "$pref_dir" >/dev/null 2>&1
+    chattr -i "$xml_file" >/dev/null 2>&1
+
+    existing_content=""
+    if [ -f "$xml_file" ]; then
+        chmod 666 "$xml_file" >/dev/null 2>&1
+        existing_content=$(grep -v '</map>' "$xml_file" 2>/dev/null | grep -v 'name="app_cloner_' | grep -v '<?xml' | grep -v '<map')
+    fi
+
+    {
+        echo '<?xml version="1.0" encoding="utf-8" standalone="yes"?>'
+        echo '<map>'
+        [ -n "$existing_content" ] && echo "$existing_content"
+        
+        echo '  <boolean name="app_cloner_freeform_window" value="true" />'
+        echo '  <boolean name="app_cloner_floating_window" value="true" />'
+        echo '  <boolean name="app_cloner_enable_freeform_window" value="true" />'
+        echo '  <boolean name="app_cloner_enable_floating_window" value="true" />'
+        echo '  <boolean name="app_cloner_display_in_floating_window" value="true" />'
+        echo '  <boolean name="app_cloner_save_window_position" value="true" />'
+        echo '  <boolean name="app_cloner_remember_window_position" value="true" />'
+        echo '  <boolean name="app_cloner_restore_window_position" value="true" />'
+        
+        for prefix in app_cloner_current_window app_cloner_initial_window app_cloner_window app_cloner_default_window app_cloner_last_window app_cloner_saved_window app_cloner_freeform_window; do
+            echo "  <int name=\"${prefix}_left\" value=\"${left}\" />"
+            echo "  <int name=\"${prefix}_top\" value=\"${top}\" />"
+            echo "  <int name=\"${prefix}_right\" value=\"${right}\" />"
+            echo "  <int name=\"${prefix}_bottom\" value=\"${bottom}\" />"
+        done
+        echo '</map>'
+    } > "$xml_file"
+
+    chmod 666 "$xml_file" >/dev/null 2>&1
+    chmod 777 "$pref_dir" >/dev/null 2>&1
+    if [ -n "$APP_OWNER" ]; then
+        chown -R "$APP_OWNER" "$pref_dir" >/dev/null 2>&1
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# 3. FUNGSI EKSEKUSI RECENT APPS -> FREEFORM (PRESISI KOORDINAT CLOUDPHONE)
+# ------------------------------------------------------------------------------
+do_manual_recents_freeform_a10() {
+    pkg_name="$1"
+    left="$2"
+    top="$3"
+    right="$4"
+    bottom="$5"
+
+    # 1. Buka Recent Apps (KEYCODE_APP_SWITCH = 187)
+    log_status "1. Menekan Recent Apps..."
+    input keyevent 187 >/dev/null 2>&1
+    sleep 2
+
+    # 2. Tap Logo Aplikasi pada koordinat PRESISI X:640 Y:96
+    log_status "2. Menekan Logo Aplikasi (X: 640, Y: 96)..."
+    input tap 640 96 >/dev/null 2>&1
+    sleep 1.5
+
+    # 3. Tap Tombol Freeform pada koordinat PRESISI X:928 Y:236
+    log_status "3. Menekan tombol Freeform (X: 928, Y: 236)..."
+    input tap 928 236 >/dev/null 2>&1
+    sleep 2
+
+    # 4. Ambil Task ID khusus Android 10
+    TASK_ID=$(dumpsys activity activities 2>/dev/null | grep -E "topResumedActivity|mResumedActivity|ResumedActivity" | grep -oE 't[0-9]+' | tr -d 't' | head -n 1)
+    if [ -z "$TASK_ID" ] || [ "$TASK_ID" = "0" ]; then
+        TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${pkg_name}|${pkg_name}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
+    fi
+    if [ -z "$TASK_ID" ] || [ "$TASK_ID" = "0" ]; then
+        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 2 "$pkg_name" | grep -oE 'Task\{[^}]*#[0-9]+' | grep -oE '#[0-9]+' | tr -d '#' | head -n 1)
+    fi
+
+    if [ -n "$TASK_ID" ] && [ "$TASK_ID" != "0" ]; then
+        log_status "Menerapkan posisi Grid Task #${TASK_ID}: (${left},${top} -> ${right},${bottom})"
+        cmd activity task resize "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
+        am task resize "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
+        cmd activity task focus "$TASK_ID" >/dev/null 2>&1
+    else
+        log_error "Task ID tidak terdeteksi untuk $pkg_name"
+    fi
+}
+
+ARG_SELECTION="$1"
+ARG_ORIENT="$2"
+
+log_status "Memindai aplikasi terpasang di Android 10..."
+RAW_PACKAGES=$(pm list packages 2>/dev/null | cut -d':' -f2 | sort -u)
+
+FILTERED_PACKAGES=""
+for pkg in $RAW_PACKAGES; do
+    [ -z "$pkg" ] && continue
+    IS_SYS=0
+    for sys_pref in $EXCLUDED_PREFIXES; do
+        case "$pkg" in
+            ${sys_pref}*) IS_SYS=1; break ;;
+        esac
+    done
+    [ "$IS_SYS" -eq 0 ] && FILTERED_PACKAGES="$FILTERED_PACKAGES $pkg"
+done
+
+ALL_CLONES=$(echo "$FILTERED_PACKAGES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
+if [ -z "$ALL_CLONES" ]; then
+    log_error "Tidak ada aplikasi ditemukan!"
+    exit 1
+fi
+
+set -- $ALL_CLONES
+ARRAY_CLONES="$@"
+TOTAL_FOUND=$#
+
+printf "\n${YELLOW}Ditemukan %s Aplikasi Terpasang (Android 10):${NC}\n" "$TOTAL_FOUND"
+printf "---------------------------------------------------\n"
+i=1
+for pkg in $ARRAY_CLONES; do
+    printf "  [%3d] %s\n" "$i" "$pkg"
+    i=$((i+1))
+done
+printf "---------------------------------------------------\n"
+
+# ------------------------------------------------------------------------------
+# 4. PEMILIHAN APLIKASI (MANUAL & INTERAKTIF)
+# ------------------------------------------------------------------------------
+SELECTED_PACKAGES=""
+while [ -z "$SELECTED_PACKAGES" ]; do
+    if [ -n "$ARG_SELECTION" ]; then
+        USER_INPUT="$ARG_SELECTION"
+    else
+        printf "${CYAN}Masukkan nomor aplikasi yang ingin dibuka (contoh: 8,9,10,11): ${NC}"
+        if [ -e /dev/tty ]; then
+            if ! read -r USER_INPUT < /dev/tty; then
+                printf "\n"
+                log_error "Koneksi input terminal terputus. Keluar."
+                exit 1
+            fi
+        else
+            if ! read -r USER_INPUT; then
+                printf "\n"
+                log_error "Koneksi input terminal terputus. Keluar."
+                exit 1
+            fi
+        fi
+    fi
+    
+    USER_INPUT_CLEAN=$(echo "$USER_INPUT" | tr -d '\r\n\t' | tr ',' ' ')
+    
+    if [ -z "$USER_INPUT_CLEAN" ]; then
+        printf "${RED}[!] Input tidak boleh kosong! Masukkan nomor aplikasi.${NC}\n"
+        ARG_SELECTION=""
+        continue
+    fi
+
+    VALID=1
+    TMP_SELECTION=""
+    
+    for num in $USER_INPUT_CLEAN; do
+        case "$num" in
+            ''|*[!0-9]*)
+                VALID=0
+                break
+                ;;
+            *)
+                if [ "$num" -ge 1 ] && [ "$num" -le "$TOTAL_FOUND" ]; then
+                    val=$(echo "$ARRAY_CLONES" | awk -v n="$num" '{print $n}')
+                    if [ -n "$val" ]; then
+                        TMP_SELECTION="$TMP_SELECTION $val"
+                    else
+                        VALID=0
+                        break
+                    fi
+                else
+                    VALID=0
+                    break
+                fi
+                ;;
+        esac
+    done
+    
+    if [ "$VALID" -eq 1 ] && [ -n "$TMP_SELECTION" ]; then
+        SELECTED_PACKAGES=$(echo "$TMP_SELECTION" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
+    else
+        printf "${RED}[!] Nomor aplikasi tidak valid! Pilih nomor antara 1 sampai %d (contoh: 8,9,10,11).${NC}\n" "$TOTAL_FOUND"
+        ARG_SELECTION=""
+    fi
+done
+
+COUNT=0
+for p in $SELECTED_PACKAGES; do COUNT=$((COUNT+1)); done
+
+if [ "$COUNT" -eq 0 ]; then
+    log_error "Tidak ada aplikasi yang dipilih. Keluar."
+    exit 1
+fi
+
+# ------------------------------------------------------------------------------
+# 5. PEMILIHAN ORIENTASI LAYAR (MANUAL PILIHAN H ATAU V)
+# ------------------------------------------------------------------------------
+ORIENT_CHOICE=""
+while [ -z "$ORIENT_CHOICE" ]; do
+    if [ -n "$ARG_ORIENT" ]; then
+        ORIENT_INPUT="$ARG_ORIENT"
+    else
+        printf "\n${YELLOW}Pilih Orientasi Layar:${NC}\n"
+        printf "  [1] Horizontal (Landscape)\n"
+        printf "  [2] Vertical   (Portrait)\n"
+        printf "${CYAN}Masukkan pilihan [1 / 2 atau H / V]: ${NC}"
+        if [ -e /dev/tty ]; then
+            if ! read -r ORIENT_INPUT < /dev/tty; then
+                printf "\n"
+                log_error "Koneksi input terminal terputus. Keluar."
+                exit 1
+            fi
+        else
+            if ! read -r ORIENT_INPUT; then
+                printf "\n"
+                log_error "Koneksi input terminal terputus. Keluar."
+                exit 1
+            fi
+        fi
+    fi
+    
+    CLEAN_O=$(echo "$ORIENT_INPUT" | tr -d ' \r\n\t' | tr '[:lower:]' '[:upper:]')
+    case "$CLEAN_O" in
+        1|H|HORIZONTAL)
+            ORIENT_CHOICE="H"
+            ;;
+        2|V|VERTICAL)
+            ORIENT_CHOICE="V"
+            ;;
+        *)
+            printf "${RED}[!] Pilihan tidak valid! Masukkan 1 (Horizontal) atau 2 (Vertical).${NC}\n"
+            ARG_ORIENT=""
+            ;;
+    esac
+done
+
+# ------------------------------------------------------------------------------
+# 6. DETEKSI RESOLUSI & KALKULASI GRID
+# ------------------------------------------------------------------------------
+RAW_SIZE=""
+command -v wm >/dev/null 2>&1 && RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
+[ -z "$RAW_SIZE" ] && RAW_SIZE=$(dumpsys display 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | head -n 1)
+[ -z "$RAW_SIZE" ] && RAW_SIZE="1280x720"
+
+DIM1=$(echo "$RAW_SIZE" | cut -d'x' -f1)
+DIM2=$(echo "$RAW_SIZE" | cut -d'x' -f2)
+
+[ -z "$DIM1" ] && DIM1=1280
+[ -z "$DIM2" ] && DIM2=720
+
+if [ "$DIM1" -gt "$DIM2" ]; then
+    MAX_DIM=$DIM1
+    MIN_DIM=$DIM2
+else
+    MAX_DIM=$DIM2
+    MIN_DIM=$DIM1
+fi
+
+COLS=2
+ROWS=2
+
+if [ "$ORIENT_CHOICE" = "V" ]; then
+    MODE_NAME="VERTICAL (Portrait)"
+    W=$MIN_DIM
+    H=$MAX_DIM
+    case $COUNT in
+        1) COLS=1; ROWS=1 ;;
+        2) COLS=1; ROWS=2 ;;
+        3) COLS=1; ROWS=3 ;;
+        4) COLS=2; ROWS=2 ;;
+        5|6) COLS=2; ROWS=3 ;;
+        7|8) COLS=2; ROWS=4 ;;
+        9|10) COLS=2; ROWS=5 ;;
+        *) COLS=2; ROWS=$(((COUNT + COLS - 1) / COLS)) ;;
+    esac
+else
+    MODE_NAME="HORIZONTAL (Landscape)"
+    W=$MAX_DIM
+    H=$MIN_DIM
+    case $COUNT in
+        1) COLS=1; ROWS=1 ;;
+        2) COLS=2; ROWS=1 ;;
+        3) COLS=3; ROWS=1 ;;
+        4) COLS=2; ROWS=2 ;;
+        5|6) COLS=3; ROWS=2 ;;
+        7|8|9) COLS=3; ROWS=3 ;;
+        10|11|12) COLS=4; ROWS=3 ;;
+        *) COLS=4; ROWS=$(((COUNT + COLS - 1) / COLS)) ;;
+    esac
+fi
+
+[ "$COLS" -lt 1 ] && COLS=1
+[ "$ROWS" -lt 1 ] && ROWS=1
+
+SW=$W; SH=$H
+
+GW=$((SW / COLS))
+GH=$((SH / ROWS))
+
+printf "\n"
+log_status "Mode Grid Android 10: ${MODE_NAME} ${ROWS}x${COLS} (${COUNT} Aplikasi - Tiap Jendela: ${GW}x${GH}px)"
+printf "---------------------------------------------------\n"
+
+# ==============================================================================
+# FASE 1: BUKA SETIAP APLIKASI ➔ UBAH KE FREEFORM ➔ RESIZE KE KUADRAN MASING-MASING
+# ==============================================================================
+idx=0
+for PKG in $SELECTED_PACKAGES; do
+    row=$((idx / COLS))
+    col=$((idx % COLS))
+    
+    L=$((col * GW))
+    T=$((row * GH))
+    R=$(((col == COLS - 1) ? SW : (L + GW)))
+    B=$(((row == ROWS - 1) ? SH : (T + GH)))
+
+    printf "${GREEN}[%d/%d]${NC} Memproses Freeform A10 -> %s (Grid #%d: %d,%d -> %d,%d)\n" "$((idx+1))" "$COUNT" "$PKG" "$((idx+1))" "$L" "$T" "$R" "$B"
+    
+    PREF_DIR="/data/data/$PKG/shared_prefs"
+    PREF="$PREF_DIR/${PKG}_preferences.xml"
+    mkdir -p "$PREF_DIR" >/dev/null 2>&1
+    if [ ! -f "$PREF" ]; then
+        echo '<?xml version="1.0" encoding="utf-8" standalone="yes"?>' > "$PREF"
+        echo '<map></map>' >> "$PREF"
+    fi
+    clean_and_inject_window_keys "$PREF" "$L" "$T" "$R" "$B" "/data/data/$PKG"
+
+    # Buka Aplikasi dengan am start & monkey
+    am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" >/dev/null 2>&1
+    monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+
+    log_status "Menunggu $LAUNCH_DELAY detik agar aplikasi terbuka..."
+    sleep "$LAUNCH_DELAY"
+
+    # Sentuh Recent ➔ Sentuh Logo (640, 96) ➔ Sentuh Freeform (928, 236) ➔ Langsung Kunci Grid
+    do_manual_recents_freeform_a10 "$PKG" "$L" "$T" "$R" "$B"
+
+    idx=$((idx+1))
+done
+
+# ==============================================================================
+# FASE AKHIR: MEMASTIKAN SELURUH JENDELA FOKUS DI DEPAN
+# ==============================================================================
+# Kembali ke Layar Utama (Home) 1x sebelum menyelaraskan seluruh jendela ke depan
+log_status "Menekan tombol Home (kembali ke layar utama)..."
+input keyevent 3 >/dev/null 2>&1
+sleep 1.5
+
+log_status "A10: Menyelaraskan seluruh jendela Grid di layar..."
+sleep 1
+idx=0
+for PKG in $SELECTED_PACKAGES; do
+    row=$((idx / COLS))
+    col=$((idx % COLS))
+    L=$((col * GW))
+    T=$((row * GH))
+    R=$(((col == COLS - 1) ? SW : (L + GW)))
+    B=$(((row == ROWS - 1) ? SH : (T + GH)))
+
+    TASK_ID=$(dumpsys activity activities 2>/dev/null | grep "$PKG" | grep -oE 't[0-9]+' | tr -d 't' | head -n 1)
+    [ -z "$TASK_ID" ] && TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${PKG}|${PKG}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
+
+    if [ -n "$TASK_ID" ] && [ "$TASK_ID" != "0" ]; then
+        cmd activity task resize "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
+        am task resize "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
+        cmd activity task focus "$TASK_ID" >/dev/null 2>&1
+    fi
+    idx=$((idx+1))
+done
+
+echo "---------------------------------------------------"
+log_success "SELESAI! Seluruh ${COUNT} aplikasi tertata rapi di Grid ${MODE_NAME} (Android 10)."
