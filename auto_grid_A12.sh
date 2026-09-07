@@ -164,7 +164,19 @@ while [ -z "$SELECTED_PACKAGES" ]; do
         USER_INPUT="$ARG_SELECTION"
     else
         printf "${CYAN}Masukkan nomor aplikasi yang ingin dibuka (contoh: 8,9,10,11): ${NC}"
-        read -r USER_INPUT
+        if [ -e /dev/tty ]; then
+            if ! read -r USER_INPUT < /dev/tty; then
+                printf "\n"
+                log_error "Koneksi input terminal terputus. Keluar."
+                exit 1
+            fi
+        else
+            if ! read -r USER_INPUT; then
+                printf "\n"
+                log_error "Koneksi input terminal terputus. Keluar."
+                exit 1
+            fi
+        fi
     fi
     
     USER_INPUT_CLEAN=$(echo "$USER_INPUT" | tr -d '\r\n\t' | tr ',' ' ')
@@ -226,7 +238,19 @@ while [ -z "$ORIENT_CHOICE" ]; do
         printf "  [1] Horizontal (Landscape)\n"
         printf "  [2] Vertical   (Portrait)\n"
         printf "${CYAN}Masukkan pilihan [1 / 2 atau H / V]: ${NC}"
-        read -r ORIENT_INPUT
+        if [ -e /dev/tty ]; then
+            if ! read -r ORIENT_INPUT < /dev/tty; then
+                printf "\n"
+                log_error "Koneksi input terminal terputus. Keluar."
+                exit 1
+            fi
+        else
+            if ! read -r ORIENT_INPUT; then
+                printf "\n"
+                log_error "Koneksi input terminal terputus. Keluar."
+                exit 1
+            fi
+        fi
     fi
     
     CLEAN_O=$(echo "$ORIENT_INPUT" | tr -d ' \r\n\t' | tr '[:lower:]' '[:upper:]')
