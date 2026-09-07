@@ -1,10 +1,4 @@
 #!/system/bin/sh
-# ==============================================================================
-# SCRIPT : setlayout_a10.sh
-# TARGET : Android 10 (Q - API 29) Cloud Phone / Emulator
-# DESKRIPSI : Otomatisasi Grid Layout & Freeform Window khusus Android 10
-#              (Menu Manual Interaktif: Pilihan Aplikasi & Orientasi H/V)
-# ==============================================================================
 
 STATUS_BAR_HEIGHT=20
 HEADER_HEIGHT=35
@@ -22,9 +16,6 @@ log_status() { printf "${CYAN}[*]${NC} %s\n" "$1"; }
 log_success() { printf "${GREEN}[+]${NC} %s\n" "$1"; }
 log_error() { printf "${RED}[!]${NC} %s\n" "$1"; }
 
-# ------------------------------------------------------------------------------
-# 1. AKTIFKAN PENGATURAN FREEFORM KHUSUS ANDROID 10
-# ------------------------------------------------------------------------------
 log_status "Mengaktifkan dukungan Freeform Multi-Window Android 10..."
 settings put global enable_freeform_support 1 >/dev/null 2>&1
 settings put global force_resizable_activities 1 >/dev/null 2>&1
@@ -32,9 +23,6 @@ settings put global freeform_window_management 1 >/dev/null 2>&1
 setprop persist.sys.debug.freeform_window 1 >/dev/null 2>&1
 setprop persist.sys.debug.force_resizable 1 >/dev/null 2>&1
 
-# ------------------------------------------------------------------------------
-# 2. INJEKSI PREFERENSI WINDOW APP CLONER (SHARED PREFS XML)
-# ------------------------------------------------------------------------------
 clean_and_inject_window_keys() {
     xml_file="$1"
     left="$2"
@@ -90,32 +78,13 @@ clean_and_inject_window_keys() {
     fi
 }
 
-# ------------------------------------------------------------------------------
-# 3. FUNGSI EKSEKUSI RECENT APPS -> FREEFORM (PRESISI KOORDINAT CLOUDPHONE)
-# ------------------------------------------------------------------------------
-do_manual_recents_freeform_a10() {
+apply_task_layout_a10() {
     pkg_name="$1"
     left="$2"
     top="$3"
     right="$4"
     bottom="$5"
 
-    # 1. Buka Recent Apps (KEYCODE_APP_SWITCH = 187)
-    log_status "1. Menekan Recent Apps..."
-    input keyevent 187 >/dev/null 2>&1
-    sleep 2
-
-    # 2. Tap Logo Aplikasi pada koordinat PRESISI X:640 Y:96
-    log_status "2. Menekan Logo Aplikasi (X: 640, Y: 96)..."
-    input tap 640 96 >/dev/null 2>&1
-    sleep 1.5
-
-    # 3. Tap Tombol Freeform pada koordinat PRESISI X:928 Y:236
-    log_status "3. Menekan tombol Freeform (X: 928, Y: 236)..."
-    input tap 928 236 >/dev/null 2>&1
-    sleep 2
-
-    # 4. Ambil Task ID khusus Android 10
     TASK_ID=$(dumpsys activity activities 2>/dev/null | grep -E "topResumedActivity|mResumedActivity|ResumedActivity" | grep -oE 't[0-9]+' | tr -d 't' | head -n 1)
     if [ -z "$TASK_ID" ] || [ "$TASK_ID" = "0" ]; then
         TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${pkg_name}|${pkg_name}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
@@ -129,8 +98,6 @@ do_manual_recents_freeform_a10() {
         cmd activity task resize "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
         am task resize "$TASK_ID" "$left" "$top" "$right" "$bottom" >/dev/null 2>&1
         cmd activity task focus "$TASK_ID" >/dev/null 2>&1
-    else
-        log_error "Task ID tidak terdeteksi untuk $pkg_name"
     fi
 }
 
@@ -171,9 +138,6 @@ for pkg in $ARRAY_CLONES; do
 done
 printf "---------------------------------------------------\n"
 
-# ------------------------------------------------------------------------------
-# 4. PEMILIHAN APLIKASI (MANUAL & INTERAKTIF)
-# ------------------------------------------------------------------------------
 SELECTED_PACKAGES=""
 while [ -z "$SELECTED_PACKAGES" ]; do
     if [ -n "$ARG_SELECTION" ]; then
@@ -245,9 +209,6 @@ if [ "$COUNT" -eq 0 ]; then
     exit 1
 fi
 
-# ------------------------------------------------------------------------------
-# 5. PEMILIHAN ORIENTASI LAYAR (MANUAL PILIHAN H ATAU V)
-# ------------------------------------------------------------------------------
 ORIENT_CHOICE=""
 while [ -z "$ORIENT_CHOICE" ]; do
     if [ -n "$ARG_ORIENT" ]; then
@@ -287,9 +248,6 @@ while [ -z "$ORIENT_CHOICE" ]; do
     esac
 done
 
-# ------------------------------------------------------------------------------
-# 6. DETEKSI RESOLUSI & KALKULASI GRID
-# ------------------------------------------------------------------------------
 RAW_SIZE=""
 command -v wm >/dev/null 2>&1 && RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
 [ -z "$RAW_SIZE" ] && RAW_SIZE=$(dumpsys display 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | head -n 1)
@@ -354,9 +312,6 @@ printf "\n"
 log_status "Mode Grid Android 10: ${MODE_NAME} ${ROWS}x${COLS} (${COUNT} Aplikasi - Tiap Jendela: ${GW}x${GH}px)"
 printf "---------------------------------------------------\n"
 
-# ==============================================================================
-# FASE 1: BUKA SETIAP APLIKASI ➔ UBAH KE FREEFORM ➔ RESIZE KE KUADRAN MASING-MASING
-# ==============================================================================
 idx=0
 for PKG in $SELECTED_PACKAGES; do
     row=$((idx / COLS))
@@ -378,46 +333,14 @@ for PKG in $SELECTED_PACKAGES; do
     fi
     clean_and_inject_window_keys "$PREF" "$L" "$T" "$R" "$B" "/data/data/$PKG"
 
-    # Buka Aplikasi dengan am start & monkey
     am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$PKG" >/dev/null 2>&1
     monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 
     log_status "Menunggu $LAUNCH_DELAY detik agar aplikasi terbuka..."
     sleep "$LAUNCH_DELAY"
 
-    # Sentuh Recent ➔ Sentuh Logo (640, 96) ➔ Sentuh Freeform (928, 236) ➔ Langsung Kunci Grid
-    do_manual_recents_freeform_a10 "$PKG" "$L" "$T" "$R" "$B"
+    apply_task_layout_a10 "$PKG" "$L" "$T" "$R" "$B"
 
-    idx=$((idx+1))
-done
-
-# ==============================================================================
-# FASE AKHIR: MEMASTIKAN SELURUH JENDELA FOKUS DI DEPAN
-# ==============================================================================
-# Kembali ke Layar Utama (Home) 1x sebelum menyelaraskan seluruh jendela ke depan
-log_status "Menekan tombol Home (kembali ke layar utama)..."
-input keyevent 3 >/dev/null 2>&1
-sleep 1.5
-
-log_status "A10: Menyelaraskan seluruh jendela Grid di layar..."
-sleep 1
-idx=0
-for PKG in $SELECTED_PACKAGES; do
-    row=$((idx / COLS))
-    col=$((idx % COLS))
-    L=$((col * GW))
-    T=$((row * GH))
-    R=$(((col == COLS - 1) ? SW : (L + GW)))
-    B=$(((row == ROWS - 1) ? SH : (T + GH)))
-
-    TASK_ID=$(dumpsys activity activities 2>/dev/null | grep "$PKG" | grep -oE 't[0-9]+' | tr -d 't' | head -n 1)
-    [ -z "$TASK_ID" ] && TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${PKG}|${PKG}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
-
-    if [ -n "$TASK_ID" ] && [ "$TASK_ID" != "0" ]; then
-        cmd activity task resize "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
-        am task resize "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
-        cmd activity task focus "$TASK_ID" >/dev/null 2>&1
-    fi
     idx=$((idx+1))
 done
 
