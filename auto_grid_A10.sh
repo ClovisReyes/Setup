@@ -28,25 +28,53 @@ clean_and_inject_window_keys() {
     top="$3"
     right="$4"
     bottom="$5"
+    pkg_dir="$6"
 
+    APP_OWNER=""
+    if [ -d "$pkg_dir" ]; then
+        APP_OWNER=$(stat -c '%u:%g' "$pkg_dir" 2>/dev/null)
+        [ -z "$APP_OWNER" ] && APP_OWNER=$(ls -ld "$pkg_dir" 2>/dev/null | awk '{print $3":"$4}')
+    fi
+
+    pref_dir=$(dirname "$xml_file")
+    mkdir -p "$pref_dir" >/dev/null 2>&1
+    chmod 777 "$pref_dir" >/dev/null 2>&1
     chattr -i "$xml_file" >/dev/null 2>&1
+
+    existing_content=""
+    if [ -f "$xml_file" ]; then
+        chmod 666 "$xml_file" >/dev/null 2>&1
+        existing_content=$(grep -v '</map>' "$xml_file" 2>/dev/null | grep -v 'name="app_cloner_' | grep -v '<?xml' | grep -v '<map')
+    fi
+
+    {
+        echo '<?xml version="1.0" encoding="utf-8" standalone="yes"?>'
+        echo '<map>'
+        [ -n "$existing_content" ] && echo "$existing_content"
+        
+        echo '  <boolean name="app_cloner_freeform_window" value="true" />'
+        echo '  <boolean name="app_cloner_floating_window" value="true" />'
+        echo '  <boolean name="app_cloner_enable_freeform_window" value="true" />'
+        echo '  <boolean name="app_cloner_enable_floating_window" value="true" />'
+        echo '  <boolean name="app_cloner_display_in_floating_window" value="true" />'
+        echo '  <boolean name="app_cloner_save_window_position" value="true" />'
+        echo '  <boolean name="app_cloner_remember_window_position" value="true" />'
+        echo '  <boolean name="app_cloner_restore_window_position" value="true" />'
+        
+        for prefix in app_cloner_current_window app_cloner_initial_window app_cloner_window app_cloner_default_window app_cloner_last_window app_cloner_saved_window app_cloner_freeform_window; do
+            echo "  <int name=\"${prefix}_left\" value=\"${left}\" />"
+            echo "  <int name=\"${prefix}_top\" value=\"${top}\" />"
+            echo "  <int name=\"${prefix}_right\" value=\"${right}\" />"
+            echo "  <int name=\"${prefix}_bottom\" value=\"${bottom}\" />"
+        done
+        echo '</map>'
+    } > "$xml_file"
+
     chmod 666 "$xml_file" >/dev/null 2>&1
-
-    sed -i '/name="app_cloner_.*window_/d' "$xml_file" >/dev/null 2>&1
-
-    prefixes="app_cloner_current_window app_cloner_initial_window app_cloner_window app_cloner_default_window app_cloner_last_window app_cloner_saved_window app_cloner_freeform_window"
-    
-    xml_block=""
-    for prefix in $prefixes; do
-        xml_block="${xml_block}  <int name=\"${prefix}_left\" value=\"${left}\" \/>\n"
-        xml_block="${xml_block}  <int name=\"${prefix}_top\" value=\"${top}\" \/>\n"
-        xml_block="${xml_block}  <int name=\"${prefix}_right\" value=\"${right}\" \/>\n"
-        xml_block="${xml_block}  <int name=\"${prefix}_bottom\" value=\"${bottom}\" \/>\n"
-    done
-
-    sed -i "s|<\/map>|${xml_block}<\/map>|g" "$xml_file" >/dev/null 2>&1
-
-    chmod 444 "$xml_file" >/dev/null 2>&1
+    chmod 777 "$pref_dir" >/dev/null 2>&1
+    if [ -n "$APP_OWNER" ]; then
+        chown -R "$APP_OWNER" "$pref_dir" >/dev/null 2>&1
+    fi
 }
 
 launch_app() {
@@ -279,19 +307,26 @@ for PKG in $SELECTED_PACKAGES; do
     
     am force-stop "$PKG" >/dev/null 2>&1
     
-    mkdir -p "$PREF_DIR" >/dev/null 2>&1
-    if [ ! -f "$PREF" ]; then
-        echo '<?xml version="1.0" encoding="utf-8" standalone="yes"?>' > "$PREF"
-        echo '<map>' >> "$PREF"
-        echo '</map>' >> "$PREF"
-    fi
-
-    clean_and_inject_window_keys "$PREF" "$L" "$T" "$R" "$B"
+    clean_and_inject_window_keys "$PREF" "$L" "$T" "$R" "$B" "/data/data/$PKG"
 
     launch_app "$PKG"
 
-    log_status "Jeda $LAUNCH_DELAY detik..."
+    log_status "Menunggu $LAUNCH_DELAY detik agar aplikasi terbuka..."
     sleep "$LAUNCH_DELAY"
+
+    TASK_ID=$(dumpsys activity activities 2>/dev/null | grep -E "topResumedActivity|mResumedActivity|ResumedActivity" | grep -oE 't[0-9]+' | tr -d 't' | head -n 1)
+    if [ -z "$TASK_ID" ] || [ "$TASK_ID" = "0" ]; then
+        TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${PKG}|${PKG}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
+    fi
+    if [ -z "$TASK_ID" ] || [ "$TASK_ID" = "0" ]; then
+        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 2 "$PKG" | grep -oE 'Task\{[^}]*#[0-9]+' | grep -oE '#[0-9]+' | tr -d '#' | head -n 1)
+    fi
+
+    if [ -n "$TASK_ID" ] && [ "$TASK_ID" != "0" ]; then
+        cmd activity task resize "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
+        am task resize "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
+        cmd activity task focus "$TASK_ID" >/dev/null 2>&1
+    fi
 
     idx=$((idx+1))
 done
