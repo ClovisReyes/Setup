@@ -285,7 +285,7 @@ GW=$((SW / COLS))
 GH=$((USABLE_GAME_H / ROWS))
 
 printf "\n"
-log_status "Mode Grid: ${MODE_NAME} ${ROWS}x${COLS} (${COUNT} Aplikasi - Tiap Jendela: ${GW}x${GH}px)"
+log_status "Mode Grid: ${MODE_NAME} ${ROWS}x${COLS} (${COUNT} Aplikasi - Tiap Jendela: ${GW}x${GH}px | Offset Header: ${HEADER_HEIGHT}px)"
 printf "---------------------------------------------------\n"
 
 idx=0
@@ -303,9 +303,10 @@ for PKG in $SELECTED_PACKAGES; do
     R=$(((col == COLS - 1) ? SW : (L + GW)))
     B=$(((row == ROWS - 1) ? SH : (T + GH)))
 
-    printf "${GREEN}[%d/%d]${NC} Setup Grid Layout -> %s\n" "$((idx+1))" "$COUNT" "$PKG"
+    printf "${GREEN}[%d/%d]${NC} Setup Grid Layout -> %s (Grid: %d,%d -> %d,%d)\n" "$((idx+1))" "$COUNT" "$PKG" "$L" "$T" "$R" "$B"
     
     am force-stop "$PKG" >/dev/null 2>&1
+    sleep 1
     
     clean_and_inject_window_keys "$PREF" "$L" "$T" "$R" "$B" "/data/data/$PKG"
 
@@ -314,13 +315,8 @@ for PKG in $SELECTED_PACKAGES; do
     log_status "Menunggu $LAUNCH_DELAY detik agar aplikasi terbuka..."
     sleep "$LAUNCH_DELAY"
 
-    TASK_ID=$(dumpsys activity activities 2>/dev/null | grep -E "topResumedActivity|mResumedActivity|ResumedActivity" | grep -oE 't[0-9]+' | tr -d 't' | head -n 1)
-    if [ -z "$TASK_ID" ] || [ "$TASK_ID" = "0" ]; then
-        TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${PKG}|${PKG}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
-    fi
-    if [ -z "$TASK_ID" ] || [ "$TASK_ID" = "0" ]; then
-        TASK_ID=$(dumpsys activity recents 2>/dev/null | grep -B 2 "$PKG" | grep -oE 'Task\{[^}]*#[0-9]+' | grep -oE '#[0-9]+' | tr -d '#' | head -n 1)
-    fi
+    TASK_ID=$(dumpsys activity activities 2>/dev/null | grep -E "TaskRecord\{.*${PKG}|${PKG}" | grep -oE '(taskId=[0-9]+|#[0-9]+|t[0-9]+)' | grep -oE '[0-9]+' | head -n 1)
+    [ -z "$TASK_ID" ] && TASK_ID=$(dumpsys activity tasks 2>/dev/null | grep -E "A=[0-9]+:${PKG}|${PKG}" | grep -oE '#[0-9]+' | tr -d '#' | tail -n 1)
 
     if [ -n "$TASK_ID" ] && [ "$TASK_ID" != "0" ]; then
         cmd activity task resize "$TASK_ID" "$L" "$T" "$R" "$B" >/dev/null 2>&1
