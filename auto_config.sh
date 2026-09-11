@@ -298,58 +298,111 @@ log_success "Cache Cleaned, Android 10 RAM Compaction & Activity Manager 32 Limi
 
 
 # ------------------------------------------------------------------------------
-# 8. DISABLE SELURUH GOOGLE (KECUALI WEBVIEW) & BLOATWARE SISTEM
+# 8. PEMBERSIHAN MEMORI & DEBLOAT TOTAL (DELETE JIKA BISA, DISABLE JIKA TIDAK)
+#    KECUALI GOOGLE KEYBOARD (GBOARD) & WEBVIEW
 # ------------------------------------------------------------------------------
-log_header "8. MEMPROSES DISABLE TOTAL GOOGLE (KECUALI WEBVIEW)"
+log_header "8. MEMPROSES SCAN MEMORI & DEBLOAT APK (DELETE / DISABLE)"
 
-log_status "Memastikan WebView Tetap AKTIF..."
+log_status "Memastikan Google Keyboard (Gboard) & WebView Tetap AKTIF..."
+pm enable com.google.android.inputmethod.latin >/dev/null 2>&1
+pm enable com.android.inputmethod.latin >/dev/null 2>&1
 pm enable com.google.android.webview >/dev/null 2>&1
 pm enable com.android.webview >/dev/null 2>&1
+pm unhide com.google.android.inputmethod.latin >/dev/null 2>&1
+pm unhide com.android.inputmethod.latin >/dev/null 2>&1
+pm unhide com.google.android.webview >/dev/null 2>&1
+pm unhide com.android.webview >/dev/null 2>&1
+pm unsuspend com.google.android.inputmethod.latin >/dev/null 2>&1
+pm unsuspend com.android.inputmethod.latin >/dev/null 2>&1
+pm unsuspend com.google.android.webview >/dev/null 2>&1
+pm unsuspend com.android.webview >/dev/null 2>&1
 
-# Mematikan Google Chrome secara khusus
-log_status "Mematikan Google Chrome (com.android.chrome)..."
-CHROME_PKGS="com.android.chrome com.google.android.apps.chrome com.chrome.beta com.chrome.dev"
-for cpkg in $CHROME_PKGS; do
-    am force-stop "$cpkg" >/dev/null 2>&1
-    pm disable-user --user 0 "$cpkg" >/dev/null 2>&1
-    pm disable "$cpkg" >/dev/null 2>&1
-done
-
-log_status "Mematikan SELURUH paket Google (100% tanpa terkecuali, kecuali WebView)..."
-
-ALL_GOOGLE=$(pm list packages 2>/dev/null | grep -iE 'google|chrome' | cut -d':' -f2)
-
-for gpkg in $ALL_GOOGLE; do
-    [ -z "$gpkg" ] && continue
-    case "$gpkg" in
-        *webview*)
-            continue
+# Fungsi Cek Whitelist (JANGAN HAPUS & JANGAN DISABLE)
+is_whitelisted_pkg() {
+    _p="$1"
+    case "$_p" in
+        *webview*|*WebView*|*inputmethod*|*keyboard*|*Keyboard*|*gboard*|*Gboard*|*latin*|*Latin*)
+            return 0
+            ;;
+        android|com.android.systemui|com.android.settings|com.termux|*launcher*|*home*|*installer*|*permission*|*cloner*|*roblox*|*Roblox*|*sandx*|*dual*|*parallel*|*appcloner*|*magisk*|*topjohnwu*|*supersu*|*lsposed*|*xposed*)
+            return 0
             ;;
     esac
-    am force-stop "$gpkg" >/dev/null 2>&1
-    pm disable-user --user 0 "$gpkg" >/dev/null 2>&1
-    pm disable "$gpkg" >/dev/null 2>&1
+    return 1
+}
+
+# Fungsi Eksekusi: Hapus jika bisa, Disable jika tidak bisa dihapus
+process_apk_cleanup() {
+    _target="$1"
+    [ -z "$_target" ] && return
+    
+    # Lewati jika masuk whitelist
+    if is_whitelisted_pkg "$_target"; then
+        return
+    fi
+    
+    # 1. Hentikan paksa proses di memori
+    am force-stop "$_target" >/dev/null 2>&1
+    cmd activity force-stop "$_target" >/dev/null 2>&1
+    
+    # 2. Coba HAPUS / UNINSTALL paket (Fase 1)
+    pm uninstall -k --user 0 "$_target" >/dev/null 2>&1
+    pm uninstall "$_target" >/dev/null 2>&1
+    
+    # 3. Cek apakah paket masih ada di memori/sistem (misal system read-only)
+    if pm list packages 2>/dev/null | grep -F "package:$_target" >/dev/null 2>&1; then
+        # Jika tidak bisa dihapus, jalankan FALLBACK DISABLE (Fase 2)
+        pm disable-user --user 0 "$_target" >/dev/null 2>&1
+        pm disable "$_target" >/dev/null 2>&1
+        pm hide "$_target" >/dev/null 2>&1
+        pm suspend "$_target" >/dev/null 2>&1
+        cmd appops set "$_target" RUN_IN_BACKGROUND ignore >/dev/null 2>&1
+        cmd appops set "$_target" RUN_ANY_IN_BACKGROUND ignore >/dev/null 2>&1
+    fi
+}
+
+log_status "Memindai & Membersihkan Google Chrome & Aplikasi Browser..."
+CHROME_PKGS="com.android.chrome com.google.android.apps.chrome com.chrome.beta com.chrome.dev com.android.browser org.chromium.chrome"
+for cpkg in $CHROME_PKGS; do
+    process_apk_cleanup "$cpkg"
 done
 
-log_status "Mematikan Bloatware Sistem Lainnya (Kamera, Galeri, Jam, Email, dll)..."
+log_status "Memindai SELURUH Paket Google di Memori (Delete / Disable Fallback)..."
+ALL_GOOGLE=$(pm list packages 2>/dev/null | grep -iE 'google|chrome|android.gms|android.gsf|vending' | cut -d':' -f2)
+for gpkg in $ALL_GOOGLE; do
+    process_apk_cleanup "$gpkg"
+done
+
+log_status "Memindai Bloatware Sistem di Memori (Kamera, Galeri, Jam, Email, dll)..."
 SYS_PACKAGES=$(pm list packages -s 2>/dev/null | cut -d':' -f2)
-BLOAT_PATTERNS="vending|bips|printspooler|wallpaper|feedback|musicfx|cellbroadcast|talkback|companion|bookmark|camera|gallery|music|video|calendar|deskclock|clock|email|contacts|dialer|messaging|mms|stk|fmradio|calculator|soundrecorder|chrome"
+BLOAT_PATTERNS="vending|bips|printspooler|wallpaper|feedback|musicfx|cellbroadcast|talkback|companion|bookmark|camera|gallery|music|video|calendar|deskclock|clock|email|contacts|dialer|messaging|mms|stk|fmradio|calculator|soundrecorder|chrome|browser|drive|docs|sheets|slides|youtube|hangouts|duo|maps|photos|gmail|fitness|assistant|quicksearchbox|speech|hotword|tts|marvin|facelock|setupwizard|location.history"
 
 for pkg in $SYS_PACKAGES; do
     [ -z "$pkg" ] && continue
-    case "$pkg" in
-        android|com.android.systemui|com.android.settings|com.termux|*launcher*|*webview*|*installer*|*permission*)
-            continue
-            ;;
-    esac
-    
     if echo "$pkg" | grep -iE "$BLOAT_PATTERNS" >/dev/null 2>&1; then
-        am force-stop "$pkg" >/dev/null 2>&1
-        pm disable-user --user 0 "$pkg" >/dev/null 2>&1
-        pm disable "$pkg" >/dev/null 2>&1
+        process_apk_cleanup "$pkg"
     fi
 done
-log_success "SELURUH Aplikasi Google & Chrome = DISABLED (100%, Kecuali WebView)"
+
+log_status "Memindai Sisa Proses Aplikasi Berjalan di RAM Memory..."
+# Ambil daftar package dari proses aktif di memori
+RUNNING_PROCS=$(ps -A -o NAME 2>/dev/null || ps -ef 2>/dev/null | awk '{print $NF}' || ps 2>/dev/null | awk '{print $NF}')
+for proc_name in $RUNNING_PROCS; do
+    [ -z "$proc_name" ] && continue
+    if echo "$proc_name" | grep -E '^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)+$' >/dev/null 2>&1; then
+        if echo "$proc_name" | grep -iE "google|chrome|$BLOAT_PATTERNS" >/dev/null 2>&1; then
+            process_apk_cleanup "$proc_name"
+        fi
+    fi
+done
+
+# Pastikan kembali Google Keyboard & WebView dalam kondisi AKTIF 100%
+pm enable com.google.android.inputmethod.latin >/dev/null 2>&1
+pm enable com.android.inputmethod.latin >/dev/null 2>&1
+pm enable com.google.android.webview >/dev/null 2>&1
+pm enable com.android.webview >/dev/null 2>&1
+
+log_success "Scan Memori & Debloat Selesai: Dihapus jika bisa, Di-disable jika sistem (GBOARD & WEBVIEW AMAN)"
 
 
 # ------------------------------------------------------------------------------
@@ -458,7 +511,8 @@ check_val "Wi-Fi Location Scan" "${V_WIFI_SCAN:-0}" "0"
 check_val "Bluetooth Service State" "${V_BT_ON:-0}" "0"
 check_val "Disable HW Overlays (GPU)" "${V_HW_OVERLAY:-1}" "1"
 check_val "Stay Awake State" "${V_STAY_AWAKE:-3}" "3"
-check_val "Google Apps & Bloatware" "DISABLED" "DISABLED"
+check_val "Google Apps & Bloatware" "DELETED/DISABLED (KECUALI GBOARD & WEBVIEW)" "DELETED|DISABLED"
 [ "$IS_ROOT" -eq 1 ] && check_val "Root CPU, RAM & Net Tweaks" "APPLIED" "APPLIED" || check_val "Root CPU, RAM & Net Tweaks" "SKIPPED (NON-ROOT)" "SKIPPED"
 
 log_header "KONFIGURASI SELESAI DITERAPKAN!"
+
