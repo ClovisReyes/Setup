@@ -33,7 +33,7 @@ clean_and_inject_window_keys() {
     APP_OWNER=""
     if [ -d "$pkg_dir" ]; then
         APP_OWNER=$(stat -c '%u:%g' "$pkg_dir" 2>/dev/null)
-        [ -z "$APP_OWNER" ] && APP_OWNER=$(ls -ld "$pkg_dir" 2>/dev/null | awk '{print $3":"$4}')
+        [ -z "$APP_OWNER" ] && APP_OWNER=$(ls -ld "$pkg_dir" 2>/dev/null | tr -s ' ' | cut -d' ' -f3,4 | tr ' ' ':')
     fi
 
     pref_dir=$(dirname "$xml_file")
@@ -158,7 +158,7 @@ while [ -z "$SELECTED_PACKAGES" ]; do
         num_clean=$(echo "$num" | tr -cd '0-9')
         if [ -n "$num_clean" ]; then
             if [ "$num_clean" -ge 1 ] && [ "$num_clean" -le "$TOTAL_FOUND" ]; then
-                val=$(echo "$ARRAY_CLONES" | awk -v n="$num_clean" '{print $n}')
+                eval "val=\${$num_clean}"
                 [ -n "$val" ] && TMP_SELECTION="$TMP_SELECTION $val"
             else
                 VALID=0
@@ -220,8 +220,7 @@ while [ -z "$ORIENT_CHOICE" ]; do
     esac
 done
 
-RAW_SIZE=$(wm size 2>/dev/null | awk '{print $3}')
-[ -z "$RAW_SIZE" ] && RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
+RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
 [ -z "$RAW_SIZE" ] && RAW_SIZE="1280x720"
 
 DIM1=$(echo "$RAW_SIZE" | cut -d'x' -f1)
