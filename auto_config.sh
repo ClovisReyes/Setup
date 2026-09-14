@@ -127,6 +127,13 @@ for v in volume_music volume_ring volume_notification volume_alarm volume_voice 
 done
 
 cmd notification set_dnd none >/dev/null 2>&1
+cmd notification set_dnd on >/dev/null 2>&1
+settings put secure enabled_notification_policy_access_packages "com.termux:com.android.shell" >/dev/null 2>&1
+service call notification 62 i32 2 i32 0 s16 "termux" >/dev/null 2>&1
+service call notification 63 i32 2 i32 0 s16 "termux" >/dev/null 2>&1
+service call notification 64 i32 2 i32 0 s16 "termux" >/dev/null 2>&1
+service call notification 49 s16 "android" i32 3 >/dev/null 2>&1
+service call notification 50 s16 "android" i32 3 >/dev/null 2>&1
 settings put global zen_mode 2 >/dev/null 2>&1
 settings put secure zen_mode 2 >/dev/null 2>&1
 settings put system zen_mode 2 >/dev/null 2>&1
