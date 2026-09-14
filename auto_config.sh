@@ -11,6 +11,15 @@ log_status() { printf "${CYAN}[*]${NC} %s\n" "$1"; }
 log_success() { printf "${GREEN}[+]${NC} %s\n" "$1"; }
 log_error() { printf "${RED}[!] %s${NC}\n" "$1"; }
 
+safe_write() {
+    _val="$1"
+    _tgt="$2"
+    if [ -w "$_tgt" ]; then
+        (echo "$_val" > "$_tgt") 2>/dev/null && return 0
+    fi
+    return 1
+}
+
 clear
 log_header "CloudPhone Setup"
 
@@ -29,8 +38,8 @@ else
 fi
 
 log_header "Developer Options"
+log_status "Configuring display, animations & buffer"
 
-log_status "Setting logger buffer -> 64k"
 logcat -G 64K >/dev/null 2>&1
 logcat -G 64k >/dev/null 2>&1
 logcat -G off >/dev/null 2>&1
@@ -64,12 +73,10 @@ setprop ctl.restart logd >/dev/null 2>&1
 killall -9 logd >/dev/null 2>&1
 am force-stop com.android.settings >/dev/null 2>&1
 
-log_status "Setting animations -> off"
 settings put global window_animation_scale 0.0 >/dev/null 2>&1
 settings put global transition_animation_scale 0.0 >/dev/null 2>&1
 settings put global animator_duration_scale 0.0 >/dev/null 2>&1
 
-log_status "Setting smallest width -> 850dp"
 RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
 if [ -z "$RAW_SIZE" ]; then
     RAW_SIZE=$(dumpsys display 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | head -n 1)
@@ -85,11 +92,9 @@ if [ -n "$RAW_SIZE" ]; then
     wm density "$TARGET_DPI" >/dev/null 2>&1
     settings put secure display_density_forced "$TARGET_DPI" >/dev/null 2>&1
 else
-    log_error "Gagal deteksi resolusi, fallback ke 200 DPI"
     wm density 200 >/dev/null 2>&1
 fi
 
-log_status "Enabling freeform & desktop mode"
 settings put global force_resizable_activities 1 >/dev/null 2>&1
 setprop persist.sys.debug.force_resizable 1 >/dev/null 2>&1
 settings put global enable_freeform_support 1 >/dev/null 2>&1
@@ -98,22 +103,21 @@ settings put global force_desktop_mode_on_external_displays 1 >/dev/null 2>&1
 setprop persist.sys.debug.desktop_mode 1 >/dev/null 2>&1
 
 log_header "Accounts & Location"
+log_status "Disabling auto sync & location tracking"
 
-log_status "Disabling auto sync"
 settings put global master_sync_enabled 0 >/dev/null 2>&1
 settings put secure master_sync_enabled 0 >/dev/null 2>&1
 cmd account set-auto-sync false >/dev/null 2>&1
 cmd sync set-auto-sync false >/dev/null 2>&1
 
-log_status "Disabling location"
 settings put secure location_mode 0 >/dev/null 2>&1
 settings put secure location_providers_allowed "-gps,-network" >/dev/null 2>&1
 settings put secure location_providers_allowed "" >/dev/null 2>&1
 cmd location set-location-enabled false >/dev/null 2>&1
 
 log_header "Sound & DND"
+log_status "Muting audio & enabling DND (Total Silence)"
 
-log_status "Muting volume & system sounds"
 for s in 0 1 2 3 4 5 6 7 8 9 10; do
     media volume --stream "$s" --set 0 >/dev/null 2>&1
     cmd audio set-volume --stream "$s" 0 >/dev/null 2>&1
@@ -122,7 +126,6 @@ for v in volume_music volume_ring volume_notification volume_alarm volume_voice 
     settings put system "$v" 0 >/dev/null 2>&1
 done
 
-log_status "Enabling DND (Total Silence) & silent mode"
 cmd notification set_dnd none >/dev/null 2>&1
 settings put global zen_mode 2 >/dev/null 2>&1
 settings put secure zen_mode 2 >/dev/null 2>&1
@@ -139,8 +142,8 @@ done
 am force-stop com.android.settings >/dev/null 2>&1
 
 log_header "Display & Network"
+log_status "Setting dark theme, brightness & DNS"
 
-log_status "Setting dark theme & brightness 0"
 settings put system screen_brightness_mode 0 >/dev/null 2>&1
 settings put system screen_brightness 0 >/dev/null 2>&1
 cmd uimode night yes >/dev/null 2>&1
@@ -148,13 +151,12 @@ settings put secure ui_night_mode 2 >/dev/null 2>&1
 settings put system accelerometer_rotation 0 >/dev/null 2>&1
 settings put system user_rotation 0 >/dev/null 2>&1
 
-log_status "Setting Cloudflare DNS"
 settings put global private_dns_mode hostname >/dev/null 2>&1
 settings put global private_dns_specifier 1dot1dot1dot1.cloudflare-dns.com >/dev/null 2>&1
 
 log_header "Performance & Memory"
+log_status "Tuning memory limits, telemetry & GPU compositing"
 
-log_status "Disabling scanning & telemetry"
 settings put global wifi_scan_always_enabled 0 >/dev/null 2>&1
 settings put global wifi_scan_throttle_enabled 1 >/dev/null 2>&1
 settings put global ble_scan_always_enabled 0 >/dev/null 2>&1
@@ -165,7 +167,6 @@ settings put global network_scoring_ui_enabled 0 >/dev/null 2>&1
 settings put global send_action_app_error 0 >/dev/null 2>&1
 settings put global drop_box_flags 0 >/dev/null 2>&1
 
-log_status "Enabling GPU compositing & low touch latency"
 setprop debug.sf.disable_hw_overlays 1 >/dev/null 2>&1
 setprop debug.composition.type gpu >/dev/null 2>&1
 settings put global disable_window_blurs 1 >/dev/null 2>&1
@@ -173,7 +174,6 @@ settings put secure long_press_timeout 250 >/dev/null 2>&1
 settings put secure multi_press_timeout 250 >/dev/null 2>&1
 settings put system touch.pressure.scale 0.001 >/dev/null 2>&1
 
-log_status "Disabling unused services (Bluetooth, Print, Tracing)"
 settings put global media_provider_scan_location 0 >/dev/null 2>&1
 settings put global download_manager_max_bytes_over_mobile 2147483647 >/dev/null 2>&1
 cmd bluetooth disable >/dev/null 2>&1
@@ -187,16 +187,13 @@ settings put global stay_on_while_plugged_in 3 >/dev/null 2>&1
 settings put global game_dashboard_always_on 0 >/dev/null 2>&1
 settings put global sys_traced 0 >/dev/null 2>&1
 setprop persist.traced.enable 0 >/dev/null 2>&1
-stop traced >/dev/null 2>&1
-stop traced_probes >/dev/null 2>&1
 settings put system pointer_location 0 >/dev/null 2>&1
 settings put system show_touches 0 >/dev/null 2>&1
 settings put secure accessibility_captioning_enabled 0 >/dev/null 2>&1
 
-log_status "Tuning RAM & process limits"
 pm trim-caches 1000G >/dev/null 2>&1
 sync >/dev/null 2>&1
-[ "$IS_ROOT" -eq 1 ] && echo 3 > /proc/sys/vm/drop_caches 2>/dev/null 2>&1
+[ "$IS_ROOT" -eq 1 ] && safe_write 3 /proc/sys/vm/drop_caches
 setprop persist.sys.purgeable_assets 1 >/dev/null 2>&1
 settings put global max_phantom_processes 2147483647 >/dev/null 2>&1
 device_config put activity_manager max_phantom_processes 2147483647 >/dev/null 2>&1
@@ -204,6 +201,7 @@ setprop persist.sys.fflag.override.settings_enable_monitor_phantom_procs false >
 settings put global activity_manager_constants use_compaction=true,compact_action_1=4,compact_action_2=4,max_cached_processes=32 >/dev/null 2>&1
 
 log_header "Debloat & App Cleanup"
+log_status "Debloating bloatware, Sogou IME & launcher widgets"
 
 pm enable com.google.android.inputmethod.latin >/dev/null 2>&1
 pm enable com.android.inputmethod.latin >/dev/null 2>&1
@@ -242,7 +240,6 @@ process_apk_cleanup() {
     pm disable "$_target" >/dev/null 2>&1
 }
 
-log_status "Disabling Sogou keyboard & bloat IMEs..."
 for sime in com.sohu.inputmethod.sogou com.sohu.inputmethod.sogou.oem com.baidu.input com.iflytek.inputmethod; do
     am force-stop "$sime" >/dev/null 2>&1
     pm uninstall -k --user 0 "$sime" >/dev/null 2>&1
@@ -251,7 +248,6 @@ for sime in com.sohu.inputmethod.sogou com.sohu.inputmethod.sogou.oem com.baidu.
     ime disable "$sime" >/dev/null 2>&1
 done
 
-log_status "Debloating Chrome & Google packages..."
 CHROME_PKGS="com.android.chrome com.google.android.apps.chrome com.chrome.beta com.chrome.dev com.android.browser org.chromium.chrome"
 for cpkg in $CHROME_PKGS; do
     process_apk_cleanup "$cpkg"
@@ -262,7 +258,6 @@ for gpkg in $ALL_GOOGLE; do
     process_apk_cleanup "$gpkg"
 done
 
-log_status "Debloating system apps..."
 SYS_PACKAGES=$(pm list packages -s 2>/dev/null | cut -d':' -f2 | tr -d '\r')
 BLOAT_PATTERNS="sogou|sohu|vending|bips|printspooler|wallpaper|feedback|musicfx|cellbroadcast|talkback|companion|bookmark|camera|gallery|music|video|calendar|deskclock|clock|email|contacts|dialer|messaging|mms|stk|fmradio|calculator|soundrecorder|chrome|browser|drive|docs|sheets|slides|youtube|hangouts|duo|maps|photos|gmail|fitness|assistant|quicksearchbox|speech|hotword|tts|marvin|facelock|setupwizard|location.history"
 
@@ -288,7 +283,6 @@ pm enable com.android.inputmethod.latin >/dev/null 2>&1
 pm enable com.google.android.webview >/dev/null 2>&1
 pm enable com.android.webview >/dev/null 2>&1
 
-log_status "Removing homescreen widgets..."
 rm -f /data/system/users/*/appwidgets.xml /data/system/appwidgets.xml >/dev/null 2>&1
 
 SQLITE_BIN=""
@@ -321,7 +315,7 @@ done
 log_header "Root Tweaks"
 
 if [ "$IS_ROOT" -eq 1 ]; then
-    log_status "Setting CPU governor -> dynamic (schedutil/interactive)"
+    log_status "Applying CPU governor, kernel VM & network tweaks"
     CPU_ERR=0
     for cpu in /sys/devices/system/cpu/cpu*/cpufreq; do
         avail=$(cat "$cpu/scaling_available_governors" 2>/dev/null)
@@ -337,41 +331,23 @@ if [ "$IS_ROOT" -eq 1 ]; then
         fi
         
         if [ -n "$gov" ]; then
-            echo "$gov" > "$cpu/scaling_governor" 2>/dev/null || CPU_ERR=1
+            safe_write "$gov" "$cpu/scaling_governor" || CPU_ERR=1
         fi
         
         min_f=$(cat "$cpu/cpuinfo_min_freq" 2>/dev/null)
-        [ -n "$min_f" ] && echo "$min_f" > "$cpu/scaling_min_freq" 2>/dev/null
+        [ -n "$min_f" ] && safe_write "$min_f" "$cpu/scaling_min_freq"
     done
-    if [ "$CPU_ERR" -ne 0 ]; then
-        log_error "CPU governor gagal (dibatasi vendor)"
-    fi
 
-    log_status "Stopping background CPU drain & telemetry"
-    cmd package bg-dexopt-job --cancel >/dev/null 2>&1
-    stop statsd >/dev/null 2>&1
-    stop tombstoned >/dev/null 2>&1
-    setprop persist.traced.enable 0 2>/dev/null
-    stop traced >/dev/null 2>&1
-    stop traced_probes 2>/dev/null
-
-    log_status "Tuning kernel VM & network"
     VM_ERR=0
-    echo 20480 > /proc/sys/vm/extra_free_kbytes 2>/dev/null || VM_ERR=1
-    echo 100 > /proc/sys/vm/swappiness 2>/dev/null || VM_ERR=1
-    echo 10 > /proc/sys/vm/dirty_background_ratio 2>/dev/null || VM_ERR=1
-    echo 30 > /proc/sys/vm/dirty_ratio 2>/dev/null || VM_ERR=1
-    if [ "$VM_ERR" -ne 0 ]; then
-        log_error "Kernel VM gagal (dibatasi vendor)"
-    fi
+    safe_write 20480 /proc/sys/vm/extra_free_kbytes || VM_ERR=1
+    safe_write 100 /proc/sys/vm/swappiness || VM_ERR=1
+    safe_write 10 /proc/sys/vm/dirty_background_ratio || VM_ERR=1
+    safe_write 30 /proc/sys/vm/dirty_ratio || VM_ERR=1
 
     NET_ERR=0
-    echo 1 > /proc/sys/net/ipv4/tcp_low_latency 2>/dev/null || NET_ERR=1
-    echo 3 > /proc/sys/net/ipv4/tcp_fastopen 2>/dev/null || NET_ERR=1
+    safe_write 1 /proc/sys/net/ipv4/tcp_low_latency || NET_ERR=1
+    safe_write 3 /proc/sys/net/ipv4/tcp_fastopen || NET_ERR=1
     setprop net.tcp.buffersize.wifi 4096,87380,256000,4096,16384,256000 2>/dev/null
-    if [ "$NET_ERR" -ne 0 ]; then
-        log_error "TCP network low-latency gagal (dibatasi vendor)"
-    fi
 else
     log_status "Non-root: Root tweaks dilewati"
 fi
@@ -434,6 +410,14 @@ V_SOGOU=$(pm list packages 2>/dev/null | grep -i "com.sohu.inputmethod.sogou")
 [ -z "$V_SOGOU" ] && S_SOGOU="NONAKTIF" || S_SOGOU="AKTIF"
 check_val "Sogou Input Method" "$S_SOGOU" "NONAKTIF"
 check_val "Google & Bloatware" "DELETED/DISABLED (GBOARD & WEBVIEW AKTIF)" "DELETED|DISABLED"
-[ "$IS_ROOT" -eq 1 ] && check_val "Root Tweaks" "APPLIED" "APPLIED" || check_val "Root Tweaks" "DIBATASI (NON-ROOT)" "APPLIED"
+if [ "$IS_ROOT" -eq 1 ]; then
+    if [ "$CPU_ERR" -eq 0 ] && [ "$VM_ERR" -eq 0 ]; then
+        check_val "Root Tweaks" "APPLIED" "APPLIED"
+    else
+        check_val "Root Tweaks" "DIBATASI VENDOR" "APPLIED"
+    fi
+else
+    check_val "Root Tweaks" "DIBATASI (NON-ROOT)" "APPLIED"
+fi
 
 printf "\n${GREEN}[+] Setup selesai.${NC}\n\n"
