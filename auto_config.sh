@@ -114,17 +114,20 @@ cmd location set-location-enabled false >/dev/null 2>&1
 log_header "Sound & DND"
 
 log_status "Muting volume & system sounds"
-for s in 0 1 2 3 4 5; do
+for s in 0 1 2 3 4 5 6 7 8 9 10; do
     media volume --stream "$s" --set 0 >/dev/null 2>&1
+    cmd audio set-volume --stream "$s" 0 >/dev/null 2>&1
 done
-settings put system volume_music 0 >/dev/null 2>&1
-settings put system volume_ring 0 >/dev/null 2>&1
-settings put system volume_notification 0 >/dev/null 2>&1
-settings put system volume_alarm 0 >/dev/null 2>&1
+for v in volume_music volume_ring volume_notification volume_alarm volume_voice volume_system volume_bluetooth_sco; do
+    settings put system "$v" 0 >/dev/null 2>&1
+done
 
-log_status "Enabling DND & silent mode"
-settings put global zen_mode 1 >/dev/null 2>&1
-cmd notification set_dnd on >/dev/null 2>&1
+log_status "Enabling DND (Total Silence) & silent mode"
+cmd notification set_dnd none >/dev/null 2>&1
+settings put global zen_mode 2 >/dev/null 2>&1
+settings put secure zen_mode 2 >/dev/null 2>&1
+settings put system zen_mode 2 >/dev/null 2>&1
+settings put global zen_mode_ringer_level 0 >/dev/null 2>&1
 settings put global mode_ringer 0 >/dev/null 2>&1
 
 for ns in system global secure; do
@@ -204,13 +207,18 @@ log_header "Debloat & App Cleanup"
 
 pm enable com.google.android.inputmethod.latin >/dev/null 2>&1
 pm enable com.android.inputmethod.latin >/dev/null 2>&1
+ime enable com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME >/dev/null 2>&1
+ime enable com.android.inputmethod.latin/.LatinIME >/dev/null 2>&1
 pm enable com.google.android.webview >/dev/null 2>&1
 pm enable com.android.webview >/dev/null 2>&1
 
 is_whitelisted_pkg() {
     _p="$1"
     case "$_p" in
-        *webview*|*WebView*|*inputmethod*|*keyboard*|*Keyboard*|*gboard*|*Gboard*|*latin*|*Latin*)
+        *sohu*|*sogou*)
+            return 1
+            ;;
+        *webview*|*WebView*|*gboard*|*Gboard*|*latin*|*Latin*)
             return 0
             ;;
         android|com.android.systemui|com.android.settings|com.termux|*launcher*|*home*|*installer*|*permission*|*cloner*|*roblox*|*Roblox*|*sandx*|*dual*|*parallel*|*appcloner*|*magisk*|*topjohnwu*|*supersu*|*lsposed*|*xposed*)
@@ -234,6 +242,15 @@ process_apk_cleanup() {
     pm disable "$_target" >/dev/null 2>&1
 }
 
+log_status "Disabling Sogou keyboard & bloat IMEs..."
+for sime in com.sohu.inputmethod.sogou com.sohu.inputmethod.sogou.oem com.baidu.input com.iflytek.inputmethod; do
+    am force-stop "$sime" >/dev/null 2>&1
+    pm uninstall -k --user 0 "$sime" >/dev/null 2>&1
+    pm disable-user --user 0 "$sime" >/dev/null 2>&1
+    pm disable "$sime" >/dev/null 2>&1
+    ime disable "$sime" >/dev/null 2>&1
+done
+
 log_status "Debloating Chrome & Google packages..."
 CHROME_PKGS="com.android.chrome com.google.android.apps.chrome com.chrome.beta com.chrome.dev com.android.browser org.chromium.chrome"
 for cpkg in $CHROME_PKGS; do
@@ -247,7 +264,7 @@ done
 
 log_status "Debloating system apps..."
 SYS_PACKAGES=$(pm list packages -s 2>/dev/null | cut -d':' -f2 | tr -d '\r')
-BLOAT_PATTERNS="vending|bips|printspooler|wallpaper|feedback|musicfx|cellbroadcast|talkback|companion|bookmark|camera|gallery|music|video|calendar|deskclock|clock|email|contacts|dialer|messaging|mms|stk|fmradio|calculator|soundrecorder|chrome|browser|drive|docs|sheets|slides|youtube|hangouts|duo|maps|photos|gmail|fitness|assistant|quicksearchbox|speech|hotword|tts|marvin|facelock|setupwizard|location.history"
+BLOAT_PATTERNS="sogou|sohu|vending|bips|printspooler|wallpaper|feedback|musicfx|cellbroadcast|talkback|companion|bookmark|camera|gallery|music|video|calendar|deskclock|clock|email|contacts|dialer|messaging|mms|stk|fmradio|calculator|soundrecorder|chrome|browser|drive|docs|sheets|slides|youtube|hangouts|duo|maps|photos|gmail|fitness|assistant|quicksearchbox|speech|hotword|tts|marvin|facelock|setupwizard|location.history"
 
 for pkg in $SYS_PACKAGES; do
     [ -z "$pkg" ] && continue
@@ -304,14 +321,39 @@ done
 log_header "Root Tweaks"
 
 if [ "$IS_ROOT" -eq 1 ]; then
-    log_status "Setting CPU governor -> performance"
+    log_status "Setting CPU governor -> dynamic (schedutil/interactive)"
     CPU_ERR=0
-    for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-        echo "performance" > "$cpu" 2>/dev/null || CPU_ERR=1
+    for cpu in /sys/devices/system/cpu/cpu*/cpufreq; do
+        avail=$(cat "$cpu/scaling_available_governors" 2>/dev/null)
+        gov=""
+        if echo "$avail" | grep -qw "schedutil"; then
+            gov="schedutil"
+        elif echo "$avail" | grep -qw "interactive"; then
+            gov="interactive"
+        elif echo "$avail" | grep -qw "walt"; then
+            gov="walt"
+        elif echo "$avail" | grep -qw "ondemand"; then
+            gov="ondemand"
+        fi
+        
+        if [ -n "$gov" ]; then
+            echo "$gov" > "$cpu/scaling_governor" 2>/dev/null || CPU_ERR=1
+        fi
+        
+        min_f=$(cat "$cpu/cpuinfo_min_freq" 2>/dev/null)
+        [ -n "$min_f" ] && echo "$min_f" > "$cpu/scaling_min_freq" 2>/dev/null
     done
     if [ "$CPU_ERR" -ne 0 ]; then
         log_error "CPU governor gagal (dibatasi vendor)"
     fi
+
+    log_status "Stopping background CPU drain & telemetry"
+    cmd package bg-dexopt-job --cancel >/dev/null 2>&1
+    stop statsd >/dev/null 2>&1
+    stop tombstoned >/dev/null 2>&1
+    setprop persist.traced.enable 0 2>/dev/null
+    stop traced >/dev/null 2>&1
+    stop traced_probes 2>/dev/null
 
     log_status "Tuning kernel VM & network"
     VM_ERR=0
@@ -330,11 +372,6 @@ if [ "$IS_ROOT" -eq 1 ]; then
     if [ "$NET_ERR" -ne 0 ]; then
         log_error "TCP network low-latency gagal (dibatasi vendor)"
     fi
-
-    log_status "Disabling system tracing daemon"
-    setprop persist.traced.enable 0 2>/dev/null
-    stop traced 2>/dev/null
-    stop traced_probes 2>/dev/null
 else
     log_status "Non-root: Root tweaks dilewati"
 fi
@@ -384,7 +421,7 @@ check_val "Force Resizable" "$V_RESIZE" "1"
 check_val "Freeform Windows" "$V_FREEFORM" "1"
 check_val "Auto Sync" "$V_SYNC" "0"
 check_val "Location Mode" "$V_LOC" "0"
-check_val "Do Not Disturb (DND)" "$V_DND" "1|2|3"
+check_val "Do Not Disturb (Total Silence)" "$V_DND" "2"
 check_val "Screen Brightness" "$V_BRIGHT" "0"
 check_val "Dark Theme" "$V_DARK" "2|yes"
 check_val "Auto Rotate" "$V_ROTATE" "0"
@@ -393,6 +430,9 @@ check_val "Wi-Fi Location Scan" "$V_WIFI_SCAN" "0"
 check_val "Bluetooth" "$V_BT_ON" "0"
 check_val "HW Overlays (GPU)" "$V_HW_OVERLAY" "1"
 check_val "Stay Awake" "$V_STAY_AWAKE" "3"
+V_SOGOU=$(pm list packages 2>/dev/null | grep -i "com.sohu.inputmethod.sogou")
+[ -z "$V_SOGOU" ] && S_SOGOU="NONAKTIF" || S_SOGOU="AKTIF"
+check_val "Sogou Input Method" "$S_SOGOU" "NONAKTIF"
 check_val "Google & Bloatware" "DELETED/DISABLED (GBOARD & WEBVIEW AKTIF)" "DELETED|DISABLED"
 [ "$IS_ROOT" -eq 1 ] && check_val "Root Tweaks" "APPLIED" "APPLIED" || check_val "Root Tweaks" "DIBATASI (NON-ROOT)" "APPLIED"
 
