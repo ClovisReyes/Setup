@@ -1,5 +1,6 @@
 #!/system/bin/sh
 
+{
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -40,60 +41,74 @@ fi
 log_header "Developer Options"
 log_status "Configuring display, animations & buffer"
 
-logcat -G 64K >/dev/null 2>&1
 logcat -G 64k >/dev/null 2>&1
-logcat -G off >/dev/null 2>&1
-
-setprop persist.logd.size 64K >/dev/null 2>&1
 setprop persist.logd.size 64k >/dev/null 2>&1
-setprop persist.logd.size 65536 >/dev/null 2>&1
-
-setprop logd.size 64K >/dev/null 2>&1
 setprop logd.size 64k >/dev/null 2>&1
-setprop logd.size 65536 >/dev/null 2>&1
-
-setprop persist.logd.size.main 64K >/dev/null 2>&1
-setprop persist.logd.size.system 64K >/dev/null 2>&1
-setprop persist.logd.size.radio 64K >/dev/null 2>&1
-setprop persist.logd.size.events 64K >/dev/null 2>&1
-setprop persist.logd.size.crash 64K >/dev/null 2>&1
-
-resetprop persist.logd.size 64K >/dev/null 2>&1
-resetprop persist.logd.size 64k >/dev/null 2>&1
-resetprop persist.logd.size 65536 >/dev/null 2>&1
-
+setprop persist.logd.size.main 64k >/dev/null 2>&1
+setprop persist.logd.size.system 64k >/dev/null 2>&1
+setprop persist.logd.size.radio 64k >/dev/null 2>&1
+setprop persist.logd.size.events 64k >/dev/null 2>&1
+setprop persist.logd.size.crash 64k >/dev/null 2>&1
 settings put global logd_size 64k >/dev/null 2>&1
-settings put global logd_size 64K >/dev/null 2>&1
-settings put global logd_size 65536 >/dev/null 2>&1
 settings put global logcat_buffer_size 64k >/dev/null 2>&1
 settings put secure logd_size 64k >/dev/null 2>&1
 settings put system logd_size 64k >/dev/null 2>&1
 
 setprop ctl.restart logd >/dev/null 2>&1
-killall -9 logd >/dev/null 2>&1
 am force-stop com.android.settings >/dev/null 2>&1
 
 settings put global window_animation_scale 0.0 >/dev/null 2>&1
 settings put global transition_animation_scale 0.0 >/dev/null 2>&1
 settings put global animator_duration_scale 0.0 >/dev/null 2>&1
 
-RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
-if [ -z "$RAW_SIZE" ]; then
-    RAW_SIZE=$(dumpsys display 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | head -n 1)
-fi
-
-if [ -n "$RAW_SIZE" ]; then
-    W=$(echo "$RAW_SIZE" | cut -d'x' -f1)
-    H=$(echo "$RAW_SIZE" | cut -d'x' -f2)
-    [ "$W" -lt "$H" ] && MIN_DIM=$W || MIN_DIM=$H
-    TARGET_DPI=$(( (MIN_DIM * 160 + 425) / 850 ))
-    [ "$TARGET_DPI" -lt 72 ] && TARGET_DPI=72
+USER_DP=""
+while true; do
+    printf "${CYAN}[?]${NC} Masukkan target DPI: "
+    if [ -e /dev/tty ]; then
+        if ! read -r USER_DP < /dev/tty; then
+            echo ""
+            log_error "Koneksi input terminal terputus. Keluar."
+            exit 1
+        fi
+    else
+        if ! read -r USER_DP; then
+            echo ""
+            log_error "Terminal tidak mendukung input interaktif (Bukan mode TTY). Script dihentikan!"
+            exit 1
+        fi
+    fi
     
-    wm density "$TARGET_DPI" >/dev/null 2>&1
-    settings put secure display_density_forced "$TARGET_DPI" >/dev/null 2>&1
-else
-    wm density 200 >/dev/null 2>&1
-fi
+    # Hilangkan spasi tersembunyi/carriage return jika ada
+    USER_DP=$(echo "$USER_DP" | tr -d '\r' | tr -d ' ')
+    
+    if [ -n "$USER_DP" ] && echo "$USER_DP" | grep -qE '^[0-9]+$'; then
+        if [ "$USER_DP" -lt 300 ] || [ "$USER_DP" -gt 1600 ]; then
+            log_error "DP tidak aman! Harap masukkan angka antara 300 hingga 1600."
+            continue
+        fi
+        
+        # Ambil lebar piksel layar untuk konversi DP ke DPI
+        RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
+        if [ -n "$RAW_SIZE" ]; then
+            W=$(echo "$RAW_SIZE" | cut -d'x' -f1)
+            H=$(echo "$RAW_SIZE" | cut -d'x' -f2)
+            [ "$W" -lt "$H" ] && MIN_DIM=$W || MIN_DIM=$H
+        else
+            MIN_DIM=720
+        fi
+        
+        # Rumus: DPI = (Lebar Piksel * 160) / DP Target
+        TARGET_DPI=$(( (MIN_DIM * 160) / USER_DP ))
+        [ "$TARGET_DPI" -lt 72 ] && TARGET_DPI=72
+        
+        log_status "Menerapkan Smallest Width $USER_DP"
+        wm density "$TARGET_DPI" >/dev/null 2>&1
+        settings put secure display_density_forced "$TARGET_DPI" >/dev/null 2>&1
+        break
+    else
+        log_error "Input tidak valid! Harap masukkan angka saja."
+    fi
+done
 
 settings put global force_resizable_activities 1 >/dev/null 2>&1
 setprop persist.sys.debug.force_resizable 1 >/dev/null 2>&1
@@ -120,7 +135,6 @@ log_status "Muting audio & enabling DND (Total Silence)"
 
 for s in 0 1 2 3 4 5 6 7 8 9 10; do
     media volume --stream "$s" --set 0 >/dev/null 2>&1
-    cmd audio set-volume --stream "$s" 0 >/dev/null 2>&1
 done
 for v in volume_music volume_ring volume_notification volume_alarm volume_voice volume_system volume_bluetooth_sco; do
     settings put system "$v" 0 >/dev/null 2>&1
@@ -128,12 +142,6 @@ done
 
 cmd notification set_dnd none >/dev/null 2>&1
 cmd notification set_dnd on >/dev/null 2>&1
-settings put secure enabled_notification_policy_access_packages "com.termux:com.android.shell" >/dev/null 2>&1
-service call notification 62 i32 2 i32 0 s16 "termux" >/dev/null 2>&1
-service call notification 63 i32 2 i32 0 s16 "termux" >/dev/null 2>&1
-service call notification 64 i32 2 i32 0 s16 "termux" >/dev/null 2>&1
-service call notification 49 s16 "android" i32 3 >/dev/null 2>&1
-service call notification 50 s16 "android" i32 3 >/dev/null 2>&1
 settings put global zen_mode 2 >/dev/null 2>&1
 settings put secure zen_mode 2 >/dev/null 2>&1
 settings put system zen_mode 2 >/dev/null 2>&1
@@ -162,7 +170,7 @@ settings put global private_dns_mode hostname >/dev/null 2>&1
 settings put global private_dns_specifier 1dot1dot1dot1.cloudflare-dns.com >/dev/null 2>&1
 
 log_header "Performance & Memory"
-log_status "Tuning memory limits, telemetry & GPU compositing"
+log_status "Tuning memory limits, telemetry & GPU"
 
 settings put global wifi_scan_always_enabled 0 >/dev/null 2>&1
 settings put global wifi_scan_throttle_enabled 1 >/dev/null 2>&1
@@ -174,9 +182,29 @@ settings put global network_scoring_ui_enabled 0 >/dev/null 2>&1
 settings put global send_action_app_error 0 >/dev/null 2>&1
 settings put global drop_box_flags 0 >/dev/null 2>&1
 
+# Graphics & Hardware Acceleration
+setprop debug.sf.hw 1 >/dev/null 2>&1
+setprop hw3d.force 1 >/dev/null 2>&1
+setprop video.accelerate.hw 1 >/dev/null 2>&1
+setprop persist.sys.ui.hw 1 >/dev/null 2>&1
 setprop debug.sf.disable_hw_overlays 1 >/dev/null 2>&1
 setprop debug.composition.type gpu >/dev/null 2>&1
+setprop debug.performance.tuning 1 >/dev/null 2>&1
+setprop persist.sys.use_dithering 0 >/dev/null 2>&1
 settings put global disable_window_blurs 1 >/dev/null 2>&1
+
+# UI Responsiveness & Macro Booster
+setprop windowsmgr.max_events_per_sec 200 >/dev/null 2>&1
+setprop ro.min_pointer_dur 8 >/dev/null 2>&1
+setprop ro.max.fling_velocity 12000 >/dev/null 2>&1
+setprop ro.min.fling_velocity 8000 >/dev/null 2>&1
+
+# Dalvik & JNI Optimizations
+setprop dalvik.vm.checkjni false >/dev/null 2>&1
+setprop ro.kernel.android.checkjni 0 >/dev/null 2>&1
+setprop dalvik.vm.heapsize 512m >/dev/null 2>&1
+setprop dalvik.vm.heapgrowthlimit 256m >/dev/null 2>&1
+setprop dalvik.vm.execution-mode int:jit >/dev/null 2>&1
 settings put secure long_press_timeout 250 >/dev/null 2>&1
 settings put secure multi_press_timeout 250 >/dev/null 2>&1
 settings put system touch.pressure.scale 0.001 >/dev/null 2>&1
@@ -208,7 +236,7 @@ setprop persist.sys.fflag.override.settings_enable_monitor_phantom_procs false >
 settings put global activity_manager_constants use_compaction=true,compact_action_1=4,compact_action_2=4,max_cached_processes=32 >/dev/null 2>&1
 
 log_header "Debloat & App Cleanup"
-log_status "Debloating bloatware, Sogou IME & launcher widgets"
+log_status "Debloating bloatware & launcher widgets"
 
 pm enable com.google.android.inputmethod.latin >/dev/null 2>&1
 pm enable com.android.inputmethod.latin >/dev/null 2>&1
@@ -242,16 +270,12 @@ process_apk_cleanup() {
     fi
     
     am force-stop "$_target" >/dev/null 2>&1
-    pm uninstall -k --user 0 "$_target" >/dev/null 2>&1
     pm disable-user --user 0 "$_target" >/dev/null 2>&1
-    pm disable "$_target" >/dev/null 2>&1
 }
 
 for sime in com.sohu.inputmethod.sogou com.sohu.inputmethod.sogou.oem com.baidu.input com.iflytek.inputmethod; do
     am force-stop "$sime" >/dev/null 2>&1
-    pm uninstall -k --user 0 "$sime" >/dev/null 2>&1
     pm disable-user --user 0 "$sime" >/dev/null 2>&1
-    pm disable "$sime" >/dev/null 2>&1
     ime disable "$sime" >/dev/null 2>&1
 done
 
@@ -285,30 +309,7 @@ for proc_name in $RUNNING_PROCS; do
     fi
 done
 
-pm enable com.google.android.inputmethod.latin >/dev/null 2>&1
-pm enable com.android.inputmethod.latin >/dev/null 2>&1
-pm enable com.google.android.webview >/dev/null 2>&1
-pm enable com.android.webview >/dev/null 2>&1
-
 rm -f /data/system/users/*/appwidgets.xml /data/system/appwidgets.xml >/dev/null 2>&1
-
-SQLITE_BIN=""
-if command -v sqlite3 >/dev/null 2>&1; then
-    SQLITE_BIN="sqlite3"
-elif [ -x "/data/data/com.termux/files/usr/bin/sqlite3" ]; then
-    SQLITE_BIN="/data/data/com.termux/files/usr/bin/sqlite3"
-elif [ -x "/system/xbin/sqlite3" ]; then
-    SQLITE_BIN="/system/xbin/sqlite3"
-fi
-
-if [ -n "$SQLITE_BIN" ]; then
-    for ldb in /data/data/*/databases/launcher*.db /data/user/0/*/databases/launcher*.db; do
-        if [ -f "$ldb" ]; then
-            $SQLITE_BIN "$ldb" "DELETE FROM favorites WHERE itemType IN (4, 5);" >/dev/null 2>&1
-            $SQLITE_BIN "$ldb" "VACUUM;" >/dev/null 2>&1
-        fi
-    done
-fi
 
 settings put secure show_glance 0 >/dev/null 2>&1
 settings put global show_glance 0 >/dev/null 2>&1
@@ -319,44 +320,26 @@ for lpkg in $(pm list packages 2>/dev/null | grep -iE 'launcher|home|quickstep|n
     [ -n "$lpkg" ] && am force-stop "$lpkg" >/dev/null 2>&1
 done
 
-log_header "Root Tweaks"
+log_header "Root & Advanced Tweaks"
 
 if [ "$IS_ROOT" -eq 1 ]; then
-    log_status "Applying CPU governor, kernel VM & network tweaks"
-    CPU_ERR=0
-    for cpu in /sys/devices/system/cpu/cpu*/cpufreq; do
-        avail=$(cat "$cpu/scaling_available_governors" 2>/dev/null)
-        gov=""
-        if echo "$avail" | grep -qw "schedutil"; then
-            gov="schedutil"
-        elif echo "$avail" | grep -qw "interactive"; then
-            gov="interactive"
-        elif echo "$avail" | grep -qw "walt"; then
-            gov="walt"
-        elif echo "$avail" | grep -qw "ondemand"; then
-            gov="ondemand"
-        fi
-        
-        if [ -n "$gov" ]; then
-            safe_write "$gov" "$cpu/scaling_governor" || CPU_ERR=1
-        fi
-        
-        min_f=$(cat "$cpu/cpuinfo_min_freq" 2>/dev/null)
-        [ -n "$min_f" ] && safe_write "$min_f" "$cpu/scaling_min_freq"
-    done
-
-    VM_ERR=0
-    safe_write 20480 /proc/sys/vm/extra_free_kbytes || VM_ERR=1
-    safe_write 100 /proc/sys/vm/swappiness || VM_ERR=1
-    safe_write 10 /proc/sys/vm/dirty_background_ratio || VM_ERR=1
-    safe_write 30 /proc/sys/vm/dirty_ratio || VM_ERR=1
-
+    log_status "Applying Network TCP Tweaks"
     NET_ERR=0
-    safe_write 1 /proc/sys/net/ipv4/tcp_low_latency || NET_ERR=1
     safe_write 3 /proc/sys/net/ipv4/tcp_fastopen || NET_ERR=1
+    safe_write 1 /proc/sys/net/ipv4/tcp_mtu_probing || NET_ERR=1
+    safe_write 1 /proc/sys/net/ipv4/tcp_sack || NET_ERR=1
+    safe_write 1 /proc/sys/net/ipv4/tcp_window_scaling || NET_ERR=1
+    safe_write 1 /proc/sys/net/ipv4/tcp_no_metrics_save || NET_ERR=1
+    safe_write 1 /proc/sys/net/ipv4/tcp_moderate_rcvbuf || NET_ERR=1
+    safe_write 2000 /proc/sys/net/core/somaxconn || NET_ERR=1
+    safe_write "4096 87380 8388608" /proc/sys/net/ipv4/tcp_rmem || NET_ERR=1
+    safe_write "4096 65536 8388608" /proc/sys/net/ipv4/tcp_wmem || NET_ERR=1
     setprop net.tcp.buffersize.wifi 4096,87380,256000,4096,16384,256000 2>/dev/null
+
+    fstrim -v /data >/dev/null 2>&1
+    fstrim -v /cache >/dev/null 2>&1
 else
-    log_status "Non-root: Root tweaks dilewati"
+    log_status "Non-root: Network & Fstrim dilewati"
 fi
 
 log_header "Summary"
@@ -418,13 +401,15 @@ V_SOGOU=$(pm list packages 2>/dev/null | grep -i "com.sohu.inputmethod.sogou")
 check_val "Sogou Input Method" "$S_SOGOU" "NONAKTIF"
 check_val "Google & Bloatware" "DELETED/DISABLED (GBOARD & WEBVIEW AKTIF)" "DELETED|DISABLED"
 if [ "$IS_ROOT" -eq 1 ]; then
-    if [ "$CPU_ERR" -eq 0 ] && [ "$VM_ERR" -eq 0 ]; then
-        check_val "Root Tweaks" "APPLIED" "APPLIED"
+    if [ "$NET_ERR" -eq 0 ]; then
+        check_val "Root Tweaks (Network/Fstrim)" "APPLIED" "APPLIED"
     else
-        check_val "Root Tweaks" "DIBATASI VENDOR" "APPLIED"
+        check_val "Root Tweaks (Network/Fstrim)" "PARSIAL/DIBATASI" "APPLIED"
     fi
 else
-    check_val "Root Tweaks" "DIBATASI (NON-ROOT)" "APPLIED"
+    check_val "Root Tweaks (Network/Fstrim)" "DIBATASI (NON-ROOT)" "APPLIED"
 fi
 
 printf "\n${GREEN}[+] Setup selesai.${NC}\n\n"
+
+}
