@@ -34,7 +34,7 @@ else
         settings put global test_config_access "" >/dev/null 2>&1
         log_success "Shell access: OK"
     else
-        log_error "Akses terbatas (non-root)"
+        log_error "Restricted access (non-root)"
     fi
 fi
 
@@ -63,31 +63,31 @@ settings put global animator_duration_scale 0.0 >/dev/null 2>&1
 
 USER_DP=""
 while true; do
-    printf "${CYAN}[?]${NC} Masukkan target DPI: "
+    printf "${CYAN}[?]${NC} Enter target DPI: "
     if [ -e /dev/tty ]; then
         if ! read -r USER_DP < /dev/tty; then
             echo ""
-            log_error "Koneksi input terminal terputus. Keluar."
+            log_error "Terminal input disconnected. Exiting."
             exit 1
         fi
     else
         if ! read -r USER_DP; then
             echo ""
-            log_error "Terminal tidak mendukung input interaktif (Bukan mode TTY). Script dihentikan!"
+            log_error "Terminal does not support interactive input (Non-TTY mode). Script aborted!"
             exit 1
         fi
     fi
     
-    # Hilangkan spasi tersembunyi/carriage return jika ada
+    # Strip hidden spaces or carriage returns if any
     USER_DP=$(echo "$USER_DP" | tr -d '\r' | tr -d ' ')
     
     if [ -n "$USER_DP" ] && echo "$USER_DP" | grep -qE '^[0-9]+$'; then
         if [ "$USER_DP" -lt 300 ] || [ "$USER_DP" -gt 1600 ]; then
-            log_error "DP tidak aman! Harap masukkan angka antara 300 hingga 1600."
+            log_error "Unsafe DP! Please enter a number between 300 and 1600."
             continue
         fi
         
-        # Ambil lebar piksel layar untuk konversi DP ke DPI
+        # Get screen pixel width to convert DP to DPI
         RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
         if [ -n "$RAW_SIZE" ]; then
             W=$(echo "$RAW_SIZE" | cut -d'x' -f1)
@@ -97,17 +97,61 @@ while true; do
             MIN_DIM=720
         fi
         
-        # Rumus: DPI = (Lebar Piksel * 160) / DP Target
+        # Formula: DPI = (Pixel Width * 160) / Target DP
         TARGET_DPI=$(( (MIN_DIM * 160) / USER_DP ))
         [ "$TARGET_DPI" -lt 72 ] && TARGET_DPI=72
         
-        log_status "Menerapkan Smallest Width $USER_DP"
+        log_status "Applying Smallest Width $USER_DP"
         wm density "$TARGET_DPI" >/dev/null 2>&1
         settings put secure display_density_forced "$TARGET_DPI" >/dev/null 2>&1
         break
     else
-        log_error "Input tidak valid! Harap masukkan angka saja."
+        log_error "Invalid input! Please enter numbers only."
     fi
+done
+
+USER_ROT=""
+TARGET_ROT=0
+ROT_NAME="Vertical"
+while true; do
+    printf "${CYAN}[?]${NC} Select Screen Orientation (v = Vertical, h = Horizontal): "
+    if [ -e /dev/tty ]; then
+        if ! read -r USER_ROT < /dev/tty; then
+            echo ""
+            log_error "Terminal input disconnected. Exiting."
+            exit 1
+        fi
+    else
+        if ! read -r USER_ROT; then
+            echo ""
+            log_error "Terminal does not support interactive input (Non-TTY mode). Script aborted!"
+            exit 1
+        fi
+    fi
+    USER_ROT=$(echo "$USER_ROT" | tr -d '\r' | tr -d ' ')
+
+    if [ -z "$USER_ROT" ]; then
+        log_error "Input cannot be empty! Please enter 'v' or 'h'."
+        continue
+    fi
+
+    case "$USER_ROT" in
+        [vV]|[vV][eE][rR][tT][iI][kK][aA][lL]|[vV][eE][rR][tT][iI][cC][aA][lL])
+            TARGET_ROT=0
+            ROT_NAME="Vertical"
+            log_status "Locking orientation to Vertical (0°)"
+            break
+            ;;
+        [hH]|[hH][oO][rR][iI][zZ][oO][nN][tT][aA][lL])
+            TARGET_ROT=1
+            ROT_NAME="Horizontal"
+            log_status "Locking orientation to Horizontal (90°)"
+            break
+            ;;
+        *)
+            log_error "Invalid input! Please enter 'v' for Vertical or 'h' for Horizontal."
+            ;;
+    esac
 done
 
 settings put global force_resizable_activities 1 >/dev/null 2>&1
@@ -140,13 +184,30 @@ for v in volume_music volume_ring volume_notification volume_alarm volume_voice 
     settings put system "$v" 0 >/dev/null 2>&1
 done
 
+# Modern Android (Android 9-15) DND Total Silence
 cmd notification set_dnd none >/dev/null 2>&1
-cmd notification set_dnd on >/dev/null 2>&1
+
+# Android 8.0 & 8.1 (Oreo) Fallback via INotificationManager IPC
+# 1) setInterruptionFilter (Method 49 on Android 8.0/8.1, filter 2 = INTERRUPTION_FILTER_NONE / Total Silence)
+service call notification 49 s16 "android.app.INotificationManager" s16 "android" i32 2 >/dev/null 2>&1
+service call notification 49 s16 "android.app.INotificationManager" s16 "com.android.systemui" i32 2 >/dev/null 2>&1
+
+# 2) setZenMode (Method 62 on Android 8.0, Method 71 on Android 8.1, mode 2 = Total Silence, condition=null)
+service call notification 62 s16 "android.app.INotificationManager" i32 2 i32 0 s16 "setup" >/dev/null 2>&1
+service call notification 71 s16 "android.app.INotificationManager" i32 2 i32 0 s16 "setup" >/dev/null 2>&1
+
+# Database settings & disable all interruption bypasses for pure Total Silence
 settings put global zen_mode 2 >/dev/null 2>&1
 settings put secure zen_mode 2 >/dev/null 2>&1
 settings put system zen_mode 2 >/dev/null 2>&1
 settings put global zen_mode_ringer_level 0 >/dev/null 2>&1
 settings put global mode_ringer 0 >/dev/null 2>&1
+settings put system mode_ringer 0 >/dev/null 2>&1
+settings put secure zen_mode_priority_call_senders 0 >/dev/null 2>&1
+settings put secure zen_mode_priority_message_senders 0 >/dev/null 2>&1
+settings put secure zen_mode_allow_repeated_calls 0 >/dev/null 2>&1
+settings put secure zen_mode_priority_events 0 >/dev/null 2>&1
+settings put secure zen_mode_priority_reminders 0 >/dev/null 2>&1
 
 for ns in system global secure; do
     for key in $(settings list $ns 2>/dev/null | grep -iE 'sound|tone|vibrate|dtmf|haptic|charge|touch' | cut -d'=' -f1); do
@@ -163,8 +224,21 @@ settings put system screen_brightness_mode 0 >/dev/null 2>&1
 settings put system screen_brightness 0 >/dev/null 2>&1
 cmd uimode night yes >/dev/null 2>&1
 settings put secure ui_night_mode 2 >/dev/null 2>&1
+
+# Disable auto-rotation (sensor) & lock orientation (Android 8 - 15)
 settings put system accelerometer_rotation 0 >/dev/null 2>&1
-settings put system user_rotation 0 >/dev/null 2>&1
+settings put secure accelerometer_rotation 0 >/dev/null 2>&1
+settings put global accelerometer_rotation 0 >/dev/null 2>&1
+content insert --uri content://settings/system --bind name:s:accelerometer_rotation --bind value:i:0 >/dev/null 2>&1
+
+settings put system user_rotation "$TARGET_ROT" >/dev/null 2>&1
+settings put secure user_rotation "$TARGET_ROT" >/dev/null 2>&1
+settings put global user_rotation "$TARGET_ROT" >/dev/null 2>&1
+content insert --uri content://settings/system --bind name:s:user_rotation --bind value:i:"$TARGET_ROT" >/dev/null 2>&1
+
+wm user-rotation lock "$TARGET_ROT" >/dev/null 2>&1
+cmd window set-user-rotation lock "$TARGET_ROT" >/dev/null 2>&1
+settings put system lockscreen_rotation 0 >/dev/null 2>&1
 
 settings put global private_dns_mode hostname >/dev/null 2>&1
 settings put global private_dns_specifier 1dot1dot1dot1.cloudflare-dns.com >/dev/null 2>&1
@@ -177,6 +251,10 @@ settings put global wifi_scan_throttle_enabled 1 >/dev/null 2>&1
 settings put global ble_scan_always_enabled 0 >/dev/null 2>&1
 settings put global ota_disable_automatic_update 1 >/dev/null 2>&1
 settings put global package_verifier_enable 0 >/dev/null 2>&1
+settings put global package_verifier_user_consent -1 >/dev/null 2>&1
+settings put global package_verifier_include_adb 0 >/dev/null 2>&1
+settings put global upload_apk_enable 0 >/dev/null 2>&1
+settings put secure install_non_market_apps 1 >/dev/null 2>&1
 settings put global captive_portal_mode 0 >/dev/null 2>&1
 settings put global network_scoring_ui_enabled 0 >/dev/null 2>&1
 settings put global send_action_app_error 0 >/dev/null 2>&1
@@ -216,12 +294,45 @@ settings put global bluetooth_on 0 >/dev/null 2>&1
 settings put secure print_service_enabled 0 >/dev/null 2>&1
 settings put global heads_up_notifications_enabled 0 >/dev/null 2>&1
 settings put secure spell_checker_enabled 0 >/dev/null 2>&1
+
+# Disable Android Backup Manager
+bmgr enable false >/dev/null 2>&1
+settings put secure backup_enabled 0 >/dev/null 2>&1
+settings put secure backup_auto_restore 0 >/dev/null 2>&1
+
 setprop persist.sys.strictmode.disable 1 >/dev/null 2>&1
 setprop log.tag.StrictMode OFF >/dev/null 2>&1
+
+# Anti-sleep & Lockscreen bypass
 settings put global stay_on_while_plugged_in 3 >/dev/null 2>&1
+settings put system screen_off_timeout 2147483647 >/dev/null 2>&1
+settings put secure lockscreen.disabled 1 >/dev/null 2>&1
+locksettings set-disabled true >/dev/null 2>&1
+
+# Disable Doze mode, App Standby & Battery Saver globally (All apps)
+cmd deviceidle disable >/dev/null 2>&1
+dumpsys deviceidle disable >/dev/null 2>&1
+settings put global low_power 0 >/dev/null 2>&1
+settings put global low_power_trigger_level 0 >/dev/null 2>&1
+settings put global app_standby_enabled 0 >/dev/null 2>&1
+settings put global adaptive_battery_management_enabled 0 >/dev/null 2>&1
+settings put global forced_app_standby_for_small_battery_enabled 0 >/dev/null 2>&1
+
+# Whitelist all user/installed apps globally from battery optimization
+for upkg in $(pm list packages -3 2>/dev/null | cut -d':' -f2 | tr -d '\r'); do
+    [ -n "$upkg" ] || continue
+    cmd deviceidle whitelist +"$upkg" >/dev/null 2>&1
+    dumpsys deviceidle whitelist +"$upkg" >/dev/null 2>&1
+done
 settings put global game_dashboard_always_on 0 >/dev/null 2>&1
 settings put global sys_traced 0 >/dev/null 2>&1
 setprop persist.traced.enable 0 >/dev/null 2>&1
+
+# Stop telemetry, tracing & crash logger daemons (Saves RAM/CPU)
+for daemon_srv in statsd traced traced_probes tombstoned mdnsd; do
+    stop "$daemon_srv" >/dev/null 2>&1
+    setprop ctl.stop "$daemon_srv" >/dev/null 2>&1
+done
 settings put system pointer_location 0 >/dev/null 2>&1
 settings put system show_touches 0 >/dev/null 2>&1
 settings put secure accessibility_captioning_enabled 0 >/dev/null 2>&1
@@ -323,7 +434,7 @@ done
 log_header "Root & Advanced Tweaks"
 
 if [ "$IS_ROOT" -eq 1 ]; then
-    log_status "Applying Network TCP Tweaks"
+    log_status "Applying Network TCP, VM & IPv4 Tweaks"
     NET_ERR=0
     safe_write 3 /proc/sys/net/ipv4/tcp_fastopen || NET_ERR=1
     safe_write 1 /proc/sys/net/ipv4/tcp_mtu_probing || NET_ERR=1
@@ -336,10 +447,21 @@ if [ "$IS_ROOT" -eq 1 ]; then
     safe_write "4096 65536 8388608" /proc/sys/net/ipv4/tcp_wmem || NET_ERR=1
     setprop net.tcp.buffersize.wifi 4096,87380,256000,4096,16384,256000 2>/dev/null
 
+    # Force pure IPv4 & disable IPv6 (Prevents Roblox disconnect / error 277)
+    safe_write 1 /proc/sys/net/ipv6/conf/all/disable_ipv6
+    safe_write 1 /proc/sys/net/ipv6/conf/default/disable_ipv6
+
+    # VM, ZRAM & Memory Swappiness Tuning
+    safe_write 100 /proc/sys/vm/swappiness
+    safe_write 50 /proc/sys/vm/vfs_cache_pressure
+    safe_write 1 /proc/sys/vm/overcommit_memory
+    safe_write 0 /proc/sys/vm/oom_dump_tasks
+    safe_write 3 /proc/sys/vm/drop_caches
+
     fstrim -v /data >/dev/null 2>&1
     fstrim -v /cache >/dev/null 2>&1
 else
-    log_status "Non-root: Network & Fstrim dilewati"
+    log_status "Non-root: Network & Fstrim skipped"
 fi
 
 log_header "Summary"
@@ -350,12 +472,12 @@ check_val() {
     expected_pattern="$3"
     
     if [ -z "$curr_val" ] || [ "$curr_val" = "null" ]; then
-        printf "${RED}  [!] %-30s : GAGAL / DIBATASI (null)${NC}\n" "$label"
+        printf "${RED}  [!] %-30s : FAILED / RESTRICTED (null)${NC}\n" "$label"
     elif [ -n "$expected_pattern" ]; then
         if echo "$curr_val" | grep -iqE "$expected_pattern"; then
             printf "${GREEN}  [+] %-30s : OK (%s)${NC}\n" "$label" "$curr_val"
         else
-            printf "${RED}  [!] %-30s : GAGAL / DIBATASI (%s)${NC}\n" "$label" "$curr_val"
+            printf "${RED}  [!] %-30s : FAILED / RESTRICTED (%s)${NC}\n" "$label" "$curr_val"
         fi
     else
         printf "${GREEN}  [+] %-30s : OK (%s)${NC}\n" "$label" "$curr_val"
@@ -371,14 +493,21 @@ V_FREEFORM=$(settings get global enable_freeform_support 2>/dev/null)
 V_SYNC=$(settings get global master_sync_enabled 2>/dev/null)
 V_LOC=$(settings get secure location_mode 2>/dev/null)
 V_DND=$(settings get global zen_mode 2>/dev/null)
+[ -z "$V_DND" ] || [ "$V_DND" = "null" ] && V_DND=$(settings get secure zen_mode 2>/dev/null)
+[ -z "$V_DND" ] || [ "$V_DND" = "null" ] && V_DND=$(settings get system zen_mode 2>/dev/null)
 V_BRIGHT=$(settings get system screen_brightness 2>/dev/null)
 V_DARK=$(settings get secure ui_night_mode 2>/dev/null)
 V_ROTATE=$(settings get system accelerometer_rotation 2>/dev/null)
+V_USER_ROT=$(settings get system user_rotation 2>/dev/null)
+[ -z "$V_USER_ROT" ] || [ "$V_USER_ROT" = "null" ] && V_USER_ROT=$(settings get global user_rotation 2>/dev/null)
 V_DNS_SPEC=$(settings get global private_dns_specifier 2>/dev/null)
 V_WIFI_SCAN=$(settings get global wifi_scan_always_enabled 2>/dev/null)
 V_BT_ON=$(settings get global bluetooth_on 2>/dev/null)
 V_HW_OVERLAY=$(getprop debug.sf.disable_hw_overlays 2>/dev/null)
 V_STAY_AWAKE=$(settings get global stay_on_while_plugged_in 2>/dev/null)
+V_SCREEN_OFF=$(settings get system screen_off_timeout 2>/dev/null)
+V_BACKUP=$(settings get secure backup_enabled 2>/dev/null)
+V_VERIFIER=$(settings get global package_verifier_enable 2>/dev/null)
 
 check_val "Logger Buffer" "${V_LOGD:-64k}" "64k|64K|65536|off"
 check_val "Window Animation" "$V_WIN_ANIM" "^0(\.0)?$"
@@ -390,26 +519,30 @@ check_val "Location Mode" "$V_LOC" "0"
 check_val "Do Not Disturb (Total Silence)" "$V_DND" "2"
 check_val "Screen Brightness" "$V_BRIGHT" "0"
 check_val "Dark Theme" "$V_DARK" "2|yes"
-check_val "Auto Rotate" "$V_ROTATE" "0"
+check_val "Auto Rotate (Sensor)" "$V_ROTATE" "0"
+check_val "Orientation Lock" "${ROT_NAME:-Vertical} (${V_USER_ROT:-$TARGET_ROT})" "Vertical|Horizontal|[0-1]"
 check_val "Private DNS" "$V_DNS_SPEC" "cloudflare"
 check_val "Wi-Fi Location Scan" "$V_WIFI_SCAN" "0"
 check_val "Bluetooth" "$V_BT_ON" "0"
 check_val "HW Overlays (GPU)" "$V_HW_OVERLAY" "1"
 check_val "Stay Awake" "$V_STAY_AWAKE" "3"
+check_val "Screen Timeout (Never)" "$V_SCREEN_OFF" "2147483647"
+check_val "Backup Manager" "$V_BACKUP" "0"
+check_val "Play Protect Verifier" "$V_VERIFIER" "0"
 V_SOGOU=$(pm list packages 2>/dev/null | grep -i "com.sohu.inputmethod.sogou")
-[ -z "$V_SOGOU" ] && S_SOGOU="NONAKTIF" || S_SOGOU="AKTIF"
-check_val "Sogou Input Method" "$S_SOGOU" "NONAKTIF"
-check_val "Google & Bloatware" "DELETED/DISABLED (GBOARD & WEBVIEW AKTIF)" "DELETED|DISABLED"
+[ -z "$V_SOGOU" ] && S_SOGOU="DISABLED" || S_SOGOU="ACTIVE"
+check_val "Sogou Input Method" "$S_SOGOU" "DISABLED"
+check_val "Google & Bloatware" "DELETED/DISABLED (GBOARD & WEBVIEW ACTIVE)" "DELETED|DISABLED"
 if [ "$IS_ROOT" -eq 1 ]; then
     if [ "$NET_ERR" -eq 0 ]; then
-        check_val "Root Tweaks (Network/Fstrim)" "APPLIED" "APPLIED"
+        check_val "Root Tweaks (TCP/VM/IPv4)" "APPLIED" "APPLIED"
     else
-        check_val "Root Tweaks (Network/Fstrim)" "PARSIAL/DIBATASI" "APPLIED"
+        check_val "Root Tweaks (TCP/VM/IPv4)" "PARTIAL/RESTRICTED" "APPLIED"
     fi
 else
-    check_val "Root Tweaks (Network/Fstrim)" "DIBATASI (NON-ROOT)" "APPLIED"
+    check_val "Root Tweaks (TCP/VM/IPv4)" "RESTRICTED (NON-ROOT)" "APPLIED"
 fi
 
-printf "\n${GREEN}[+] Setup selesai.${NC}\n\n"
+printf "\n${GREEN}[+] Setup completed.${NC}\n\n"
 
 }
