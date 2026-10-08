@@ -198,10 +198,12 @@ service call notification 71 s16 "android.app.INotificationManager" i32 2 i32 0 
 
 # Database settings & disable all interruption bypasses for pure Total Silence
 settings put global zen_mode 2 >/dev/null 2>&1
+content insert --uri content://settings/global --bind name:s:zen_mode --bind value:i:2 >/dev/null 2>&1
 settings put secure zen_mode 2 >/dev/null 2>&1
 settings put system zen_mode 2 >/dev/null 2>&1
 settings put global zen_mode_ringer_level 0 >/dev/null 2>&1
 settings put global mode_ringer 0 >/dev/null 2>&1
+content insert --uri content://settings/global --bind name:s:mode_ringer --bind value:i:0 >/dev/null 2>&1
 settings put system mode_ringer 0 >/dev/null 2>&1
 settings put secure zen_mode_priority_call_senders 0 >/dev/null 2>&1
 settings put secure zen_mode_priority_message_senders 0 >/dev/null 2>&1
@@ -386,6 +388,7 @@ process_apk_cleanup() {
 
 for sime in com.sohu.inputmethod.sogou com.sohu.inputmethod.sogou.oem com.baidu.input com.iflytek.inputmethod; do
     am force-stop "$sime" >/dev/null 2>&1
+    pm uninstall -k --user 0 "$sime" >/dev/null 2>&1
     pm disable-user --user 0 "$sime" >/dev/null 2>&1
     ime disable "$sime" >/dev/null 2>&1
 done
@@ -436,15 +439,15 @@ log_header "Root & Advanced Tweaks"
 if [ "$IS_ROOT" -eq 1 ]; then
     log_status "Applying Network TCP, VM & IPv4 Tweaks"
     NET_ERR=0
-    safe_write 3 /proc/sys/net/ipv4/tcp_fastopen || NET_ERR=1
-    safe_write 1 /proc/sys/net/ipv4/tcp_mtu_probing || NET_ERR=1
-    safe_write 1 /proc/sys/net/ipv4/tcp_sack || NET_ERR=1
-    safe_write 1 /proc/sys/net/ipv4/tcp_window_scaling || NET_ERR=1
-    safe_write 1 /proc/sys/net/ipv4/tcp_no_metrics_save || NET_ERR=1
-    safe_write 1 /proc/sys/net/ipv4/tcp_moderate_rcvbuf || NET_ERR=1
-    safe_write 2000 /proc/sys/net/core/somaxconn || NET_ERR=1
-    safe_write "4096 87380 8388608" /proc/sys/net/ipv4/tcp_rmem || NET_ERR=1
-    safe_write "4096 65536 8388608" /proc/sys/net/ipv4/tcp_wmem || NET_ERR=1
+    safe_write 3 /proc/sys/net/ipv4/tcp_fastopen >/dev/null 2>&1
+    safe_write 1 /proc/sys/net/ipv4/tcp_mtu_probing >/dev/null 2>&1
+    safe_write 1 /proc/sys/net/ipv4/tcp_sack >/dev/null 2>&1
+    safe_write 1 /proc/sys/net/ipv4/tcp_window_scaling >/dev/null 2>&1
+    safe_write 1 /proc/sys/net/ipv4/tcp_no_metrics_save >/dev/null 2>&1
+    safe_write 1 /proc/sys/net/ipv4/tcp_moderate_rcvbuf >/dev/null 2>&1
+    safe_write 2000 /proc/sys/net/core/somaxconn >/dev/null 2>&1
+    safe_write "4096 87380 8388608" /proc/sys/net/ipv4/tcp_rmem >/dev/null 2>&1
+    safe_write "4096 65536 8388608" /proc/sys/net/ipv4/tcp_wmem >/dev/null 2>&1
     setprop net.tcp.buffersize.wifi 4096,87380,256000,4096,16384,256000 2>/dev/null
 
     # Force pure IPv4 & disable IPv6 (Prevents Roblox disconnect / error 277)
@@ -529,7 +532,7 @@ check_val "Stay Awake" "$V_STAY_AWAKE" "3"
 check_val "Screen Timeout (Never)" "$V_SCREEN_OFF" "2147483647"
 check_val "Backup Manager" "$V_BACKUP" "0"
 check_val "Play Protect Verifier" "$V_VERIFIER" "0"
-V_SOGOU=$(pm list packages 2>/dev/null | grep -i "com.sohu.inputmethod.sogou")
+V_SOGOU=$(pm list packages -e 2>/dev/null | grep -i "com.sohu.inputmethod.sogou")
 [ -z "$V_SOGOU" ] && S_SOGOU="DISABLED" || S_SOGOU="ACTIVE"
 check_val "Sogou Input Method" "$S_SOGOU" "DISABLED"
 check_val "Google & Bloatware" "DELETED/DISABLED (GBOARD & WEBVIEW ACTIVE)" "DELETED|DISABLED"
