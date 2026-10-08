@@ -221,7 +221,6 @@ while [ -z "$ORIENT_CHOICE" ]; do
 done
 
 RAW_SIZE=$(wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | tail -n 1)
-[ -z "$RAW_SIZE" ] && RAW_SIZE="1280x720"
 
 DIM1=$(echo "$RAW_SIZE" | cut -d'x' -f1)
 DIM2=$(echo "$RAW_SIZE" | cut -d'x' -f2)
@@ -240,16 +239,34 @@ if [ "$ORIENT_CHOICE" = "V" ]; then
     H=$MAX_DIM
 
     case $COUNT in
-        1) COLS=1; ROWS=1 ;;
-        2) COLS=1; ROWS=2 ;;
-        3) COLS=1; ROWS=3 ;;
-        4) COLS=2; ROWS=2 ;;
-        5|6) COLS=2; ROWS=3 ;;
-        7|8) COLS=2; ROWS=4 ;;
-        9|10) COLS=2; ROWS=5 ;;
+        1)
+            ROWS=1
+            R_0=1
+            ;;
+        2)
+            ROWS=2
+            R_0=1; R_1=1
+            ;;
+        3)
+            # Portrait 3: baris atas, tengah, dan bawah
+            ROWS=3
+            R_0=1; R_1=1; R_2=1
+            ;;
         *)
-            COLS=2
-            ROWS=$(((COUNT + COLS - 1) / COLS))
+            # Portrait >= 4: baris isi 2, jika ganjil baris terakhir isi 1 (full-width)
+            ROWS=$(((COUNT + 1) / 2))
+            rem=$COUNT
+            r_idx=0
+            while [ "$r_idx" -lt "$ROWS" ]; do
+                if [ "$r_idx" -eq $((ROWS - 1)) ] && [ "$((rem % 2))" -eq 1 ]; then
+                    eval "R_${r_idx}=1"
+                    rem=$((rem - 1))
+                else
+                    eval "R_${r_idx}=2"
+                    rem=$((rem - 2))
+                fi
+                r_idx=$((r_idx + 1))
+            done
             ;;
     esac
 else
@@ -258,21 +275,74 @@ else
     H=$MIN_DIM
 
     case $COUNT in
-        1) COLS=1; ROWS=1 ;;
-        2) COLS=2; ROWS=1 ;;
-        3) COLS=3; ROWS=1 ;;
-        4) COLS=2; ROWS=2 ;;
-        5|6) COLS=3; ROWS=2 ;;
-        7|8|9) COLS=3; ROWS=3 ;;
-        10|11|12) COLS=4; ROWS=3 ;;
+        1)
+            ROWS=1
+            R_0=1
+            ;;
+        2)
+            ROWS=1
+            R_0=2
+            ;;
+        3)
+            # Landscape 3: kiri, tengah, kanan
+            ROWS=1
+            R_0=3
+            ;;
+        4)
+            # Landscape 4: atas 2, bawah 2
+            ROWS=2
+            R_0=2; R_1=2
+            ;;
+        5)
+            # Landscape 5: atas 3, bawah 2
+            ROWS=2
+            R_0=3; R_1=2
+            ;;
+        6)
+            ROWS=2
+            R_0=3; R_1=3
+            ;;
+        7)
+            # Landscape 7: atas 4, bawah 3
+            ROWS=2
+            R_0=4; R_1=3
+            ;;
+        8)
+            ROWS=2
+            R_0=4; R_1=4
+            ;;
+        9)
+            # Landscape 9: atas 3, tengah 3, bawah 3
+            ROWS=3
+            R_0=3; R_1=3; R_2=3
+            ;;
+        10)
+            ROWS=3
+            R_0=4; R_1=3; R_2=3
+            ;;
+        11)
+            ROWS=3
+            R_0=4; R_1=4; R_2=3
+            ;;
+        12)
+            ROWS=3
+            R_0=4; R_1=4; R_2=4
+            ;;
         *)
-            COLS=4
-            ROWS=$(((COUNT + COLS - 1) / COLS))
+            ROWS=$(((COUNT + 3) / 4))
+            rem=$COUNT
+            r_idx=0
+            while [ "$r_idx" -lt "$ROWS" ]; do
+                rows_left=$((ROWS - r_idx))
+                c_in_row=$(((rem + rows_left - 1) / rows_left))
+                eval "R_${r_idx}=$c_in_row"
+                rem=$((rem - c_in_row))
+                r_idx=$((r_idx + 1))
+            done
             ;;
     esac
 fi
 
-[ "$COLS" -lt 1 ] && COLS=1
 [ "$ROWS" -lt 1 ] && ROWS=1
 
 SW=$W; SH=$H
@@ -280,29 +350,43 @@ SW=$W; SH=$H
 TOTAL_HEADERS=$((ROWS * HEADER_HEIGHT))
 USABLE_GAME_H=$((SH - STATUS_BAR_HEIGHT - TOTAL_HEADERS))
 
-GW=$((SW / COLS))
-GH=$((USABLE_GAME_H / ROWS))
-
 printf "\n"
-log_status "Mode Grid: ${MODE_NAME} ${ROWS}x${COLS} (${COUNT} Aplikasi - Tiap Jendela: ${GW}x${GH}px | Offset Header: ${HEADER_HEIGHT}px)"
+log_status "Mode Grid: ${MODE_NAME} ${ROWS} Baris (${COUNT} Aplikasi | Resolusi: ${SW}x${SH}px | Offset Header: ${HEADER_HEIGHT}px)"
 printf "---------------------------------------------------\n"
 
-idx=0
+cur_row=0
+cur_col=0
+app_idx=1
+
 for PKG in $SELECTED_PACKAGES; do
+    eval "COLS_IN_ROW=\$R_${cur_row}"
+    [ -z "$COLS_IN_ROW" ] || [ "$COLS_IN_ROW" -lt 1 ] && COLS_IN_ROW=1
+
+    # Perhitungan X: Presisi simetris tanpa sisa atau lebar sebelah
+    L=$(( cur_col * SW / COLS_IN_ROW ))
+    if [ "$cur_col" -eq $((COLS_IN_ROW - 1)) ]; then
+        R=$SW
+    else
+        R=$(( (cur_col + 1) * SW / COLS_IN_ROW ))
+    fi
+
+    # Perhitungan Y: Memperhitungkan Status Bar dan Header Offset
+    HEADER_OFFSET=$(((cur_row + 1) * HEADER_HEIGHT))
+    T=$(( STATUS_BAR_HEIGHT + (cur_row * USABLE_GAME_H / ROWS) + HEADER_OFFSET ))
+    if [ "$cur_row" -eq $((ROWS - 1)) ]; then
+        B=$SH
+    else
+        B=$(( STATUS_BAR_HEIGHT + ((cur_row + 1) * USABLE_GAME_H / ROWS) + HEADER_OFFSET ))
+    fi
+
+    GW=$((R - L))
+    GH=$((B - T))
+
+    printf "${GREEN}[%d/%d]${NC} Setup Grid Layout -> %s (Baris %d Kolom %d: %dx%d px -> %d,%d sampai %d,%d)\n" \
+        "$app_idx" "$COUNT" "$PKG" "$((cur_row + 1))" "$((cur_col + 1))" "$GW" "$GH" "$L" "$T" "$R" "$B"
+
     PREF_DIR="/data/data/$PKG/shared_prefs"
     PREF="$PREF_DIR/${PKG}_preferences.xml"
-    
-    row=$((idx / COLS))
-    col=$((idx % COLS))
-    
-    HEADER_OFFSET=$(((row + 1) * HEADER_HEIGHT))
-    
-    L=$((col * GW))
-    T=$((STATUS_BAR_HEIGHT + (row * GH) + HEADER_OFFSET))
-    R=$(((col == COLS - 1) ? SW : (L + GW)))
-    B=$(((row == ROWS - 1) ? SH : (T + GH)))
-
-    printf "${GREEN}[%d/%d]${NC} Setup Grid Layout -> %s (Grid: %d,%d -> %d,%d)\n" "$((idx+1))" "$COUNT" "$PKG" "$L" "$T" "$R" "$B"
     
     am force-stop "$PKG" >/dev/null 2>&1
     sleep 1
@@ -323,8 +407,13 @@ for PKG in $SELECTED_PACKAGES; do
         cmd activity task focus "$TASK_ID" >/dev/null 2>&1
     fi
 
-    idx=$((idx+1))
+    cur_col=$((cur_col + 1))
+    if [ "$cur_col" -ge "$COLS_IN_ROW" ]; then
+        cur_col=0
+        cur_row=$((cur_row + 1))
+    fi
+    app_idx=$((app_idx + 1))
 done
 
 echo "---------------------------------------------------"
-log_success "SELESAI! ${COUNT} aplikasi terbuka di Grid ${MODE_NAME} (Android 10)."
+log_success "SELESAI! ${COUNT} aplikasi terbuka di Grid ${MODE_NAME} (Android 8-10)."
