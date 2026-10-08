@@ -184,39 +184,48 @@ for v in volume_music volume_ring volume_notification volume_alarm volume_voice 
     settings put system "$v" 0 >/dev/null 2>&1
 done
 
-for ns in system global secure; do
-    for key in $(settings list $ns 2>/dev/null | grep -iE 'sound|tone|vibrate|dtmf|haptic|charge|touch' | cut -d'=' -f1); do
-        [ -n "$key" ] && settings put $ns "$key" 0 >/dev/null 2>&1
-    done
-done
-
 # Modern Android (Android 9-15) DND Total Silence
 cmd notification set_dnd none >/dev/null 2>&1
+cmd notification set_dnd on >/dev/null 2>&1
 
-# Android 8.0 & 8.1 (Oreo) Fallback
-pm grant com.android.shell android.permission.ACCESS_NOTIFICATION_POLICY >/dev/null 2>&1
-appops set com.android.shell ACCESS_NOTIFICATIONS allow >/dev/null 2>&1
+# Android 8.0/8.1 (Oreo) Fallback
+# Grant notification policy access to shell so it can change DND
 cmd notification allow_dnd com.android.shell >/dev/null 2>&1
+appops set com.android.shell ACCESS_NOTIFICATIONS allow >/dev/null 2>&1
+settings put secure enabled_notification_policy_access_packages "com.android.shell" >/dev/null 2>&1
 
-# Try AudioManager setRingerModeExternal (silent = 0)
-service call audio 11 i32 0 >/dev/null 2>&1
-service call audio 12 i32 0 >/dev/null 2>&1
+# INotificationManager setZenMode (mode 2 = Total Silence)
+# API 26 is 62, API 27 is usually 71 or 72. Safe to loop.
+for method in 62 63 64 71 72 73; do
+    service call notification $method s16 "android.app.INotificationManager" i32 2 i32 0 s16 "shell" >/dev/null 2>&1
+done
 
-# Database settings & disable all interruption bypasses for pure Total Silence
-settings put global mode_ringer 0 >/dev/null 2>&1
-content insert --uri content://settings/global --bind name:s:mode_ringer --bind value:i:0 >/dev/null 2>&1
-settings put system mode_ringer 0 >/dev/null 2>&1
+# INotificationManager setInterruptionFilter (filter 2 = NONE)
+for method in 49 50 51 58 59 60; do
+    service call notification $method s16 "android.app.INotificationManager" s16 "android" i32 2 >/dev/null 2>&1
+    service call notification $method s16 "android.app.INotificationManager" s16 "com.android.systemui" i32 2 >/dev/null 2>&1
+done
 
+# Database overrides for pure Total Silence
 settings put global zen_mode 2 >/dev/null 2>&1
 content insert --uri content://settings/global --bind name:s:zen_mode --bind value:i:2 >/dev/null 2>&1
 settings put secure zen_mode 2 >/dev/null 2>&1
 settings put system zen_mode 2 >/dev/null 2>&1
 settings put global zen_mode_ringer_level 0 >/dev/null 2>&1
+settings put global mode_ringer 0 >/dev/null 2>&1
+content insert --uri content://settings/global --bind name:s:mode_ringer --bind value:i:0 >/dev/null 2>&1
+settings put system mode_ringer 0 >/dev/null 2>&1
 settings put secure zen_mode_priority_call_senders 0 >/dev/null 2>&1
 settings put secure zen_mode_priority_message_senders 0 >/dev/null 2>&1
 settings put secure zen_mode_allow_repeated_calls 0 >/dev/null 2>&1
 settings put secure zen_mode_priority_events 0 >/dev/null 2>&1
 settings put secure zen_mode_priority_reminders 0 >/dev/null 2>&1
+
+for ns in system global secure; do
+    for key in $(settings list $ns 2>/dev/null | grep -iE 'sound|tone|vibrate|dtmf|haptic|charge|touch' | cut -d'=' -f1); do
+        [ -n "$key" ] && settings put $ns "$key" 0 >/dev/null 2>&1
+    done
+done
 
 am force-stop com.android.settings >/dev/null 2>&1
 
