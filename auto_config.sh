@@ -184,34 +184,30 @@ for v in volume_music volume_ring volume_notification volume_alarm volume_voice 
     settings put system "$v" 0 >/dev/null 2>&1
 done
 
-# Modern Android (Android 9-15) DND Total Silence
+# Grant DND policy access to shell (required before any DND change)
+settings put secure enabled_notification_policy_access_packages "com.termux:com.android.shell:android" >/dev/null 2>&1
+cmd notification allow_dnd com.android.shell >/dev/null 2>&1
+cmd notification allow_dnd android >/dev/null 2>&1
+cmd notification allow_dnd com.termux >/dev/null 2>&1
+appops set com.android.shell android:manage_notifications allow >/dev/null 2>&1
+
+# Android 9-15: cmd notification set_dnd
 cmd notification set_dnd none >/dev/null 2>&1
 cmd notification set_dnd on >/dev/null 2>&1
 
-# Android 8.0 & 8.1 (Oreo) Quick Settings DND Toggle (Click Once)
-_CURR_ZEN=$(settings get global zen_mode 2>/dev/null)
-[ -z "$_CURR_ZEN" ] || [ "$_CURR_ZEN" = "null" ] && _CURR_ZEN=$(dumpsys notification 2>/dev/null | grep -iE 'mZenMode=' | head -n 1 | grep -oE '[0-9]+')
-if [ -z "$_CURR_ZEN" ] || [ "$_CURR_ZEN" = "0" ]; then
-    cmd statusbar click-tile dnd >/dev/null 2>&1 || cmd statusbar click-tile com.android.systemui/.qs.tiles.DndTile >/dev/null 2>&1
-fi
+# Android 8+: cmd notification set_interruption_filter (3 = Total Silence)
+cmd notification set_interruption_filter 3 >/dev/null 2>&1
 
-# Database overrides fallback (only if not already active)
-_CHECK_ZEN=$(settings get global zen_mode 2>/dev/null)
-if [ "$_CHECK_ZEN" != "2" ] && [ "$_CHECK_ZEN" != "3" ]; then
-    settings put global zen_mode 2 >/dev/null 2>&1
-    content insert --uri content://settings/global --bind name:s:zen_mode --bind value:i:2 >/dev/null 2>&1
-    settings put secure zen_mode 2 >/dev/null 2>&1
-    settings put system zen_mode 2 >/dev/null 2>&1
-fi
-settings put global zen_mode_ringer_level 0 >/dev/null 2>&1
-settings put global mode_ringer 0 >/dev/null 2>&1
-content insert --uri content://settings/global --bind name:s:mode_ringer --bind value:i:0 >/dev/null 2>&1
-settings put system mode_ringer 0 >/dev/null 2>&1
-settings put secure zen_mode_priority_call_senders 0 >/dev/null 2>&1
-settings put secure zen_mode_priority_message_senders 0 >/dev/null 2>&1
-settings put secure zen_mode_allow_repeated_calls 0 >/dev/null 2>&1
-settings put secure zen_mode_priority_events 0 >/dev/null 2>&1
-settings put secure zen_mode_priority_reminders 0 >/dev/null 2>&1
+# Android 8.0 & 8.1: service call INotificationManager directly
+# setZenMode(mode=2, conditionId=null, reason="shell") - try multiple method offsets
+for _m in 62 63 64 65 60 61; do
+    service call notification $_m i32 2 i32 0 s16 "shell" >/dev/null 2>&1
+done
+# setInterruptionFilter(pkg, filter=3) - try multiple method offsets
+for _m in 49 50 47 48; do
+    service call notification $_m s16 "android" i32 3 >/dev/null 2>&1
+    service call notification $_m s16 "com.android.shell" i32 3 >/dev/null 2>&1
+done
 
 for ns in system global secure; do
     for key in $(settings list $ns 2>/dev/null | grep -iE 'sound|tone|vibrate|dtmf|haptic|charge|touch' | cut -d'=' -f1); do
@@ -243,6 +239,17 @@ content insert --uri content://settings/system --bind name:s:user_rotation --bin
 wm user-rotation lock "$TARGET_ROT" >/dev/null 2>&1
 cmd window set-user-rotation lock "$TARGET_ROT" >/dev/null 2>&1
 settings put system lockscreen_rotation 0 >/dev/null 2>&1
+
+# Lock home screen rotation (Launcher-specific, Android 8-15)
+settings put secure show_rotation_suggestions 0 >/dev/null 2>&1
+settings put system launcher_rotation 0 >/dev/null 2>&1
+settings put secure launcher_rotation 0 >/dev/null 2>&1
+for _lprov in com.android.launcher3.settings com.google.android.apps.nexuslauncher.settings com.sec.android.app.launcher.settings; do
+    content update --uri content://$_lprov/favorites --bind _key:s:pref_allowRotation --bind _value:s:false >/dev/null 2>&1
+    content insert --uri content://$_lprov/favorites --bind _key:s:pref_allowRotation --bind _value:s:false >/dev/null 2>&1
+    content update --uri content://$_lprov/favorites --bind _key:s:allow_rotation --bind _value:s:false >/dev/null 2>&1
+    content insert --uri content://$_lprov/favorites --bind _key:s:allow_rotation --bind _value:s:false >/dev/null 2>&1
+done
 
 settings put global private_dns_mode hostname >/dev/null 2>&1
 settings put global private_dns_specifier 1dot1dot1dot1.cloudflare-dns.com >/dev/null 2>&1
@@ -525,7 +532,7 @@ check_val "Force Resizable" "$V_RESIZE" "1"
 check_val "Freeform Windows" "$V_FREEFORM" "1"
 check_val "Auto Sync" "$V_SYNC" "0"
 check_val "Location Mode" "$V_LOC" "0"
-check_val "Do Not Disturb (Total/Alarms)" "$V_DND" "2|3"
+check_val "Do Not Disturb (Total Silence)" "$V_DND" "2"
 check_val "Screen Brightness" "$V_BRIGHT" "0"
 check_val "Dark Theme" "$V_DARK" "2|yes"
 check_val "Auto Rotate (Sensor)" "$V_ROTATE" "0"
