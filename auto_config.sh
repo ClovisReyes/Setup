@@ -188,23 +188,35 @@ done
 cmd notification set_dnd none >/dev/null 2>&1
 cmd notification set_dnd on >/dev/null 2>&1
 
-# Android 8.0/8.1 (Oreo) Fallback
-# Grant notification policy access to shell so it can change DND
+# Android 8.0 & 8.1 (Oreo) Direct DND Activation
+# 1) Grant Notification Policy Access to Shell
 cmd notification allow_dnd com.android.shell >/dev/null 2>&1
 appops set com.android.shell ACCESS_NOTIFICATIONS allow >/dev/null 2>&1
-settings put secure enabled_notification_policy_access_packages "com.android.shell" >/dev/null 2>&1
+settings put secure enabled_notification_policy_access_packages "com.android.shell:android" >/dev/null 2>&1
+service call notification 75 s16 "android.app.INotificationManager" s16 "com.android.shell" i32 1 >/dev/null 2>&1
 
-# INotificationManager setZenMode (mode 2 = Total Silence)
-# API 26 is 62, API 27 is usually 71 or 72. Safe to loop.
-for method in 62 63 64 71 72 73; do
-    service call notification $method s16 "android.app.INotificationManager" i32 2 i32 0 s16 "shell" >/dev/null 2>&1
-done
+# 2) INotificationManager.setZenMode (2 = Total Silence, 3 = Alarms Only)
+# AOSP Method 60 = Android 8.0, Method 69 = Android 8.1
+service call notification 60 s16 "android.app.INotificationManager" i32 2 i32 0 s16 "shell" >/dev/null 2>&1
+service call notification 60 s16 "android.app.INotificationManager" i32 3 i32 0 s16 "shell" >/dev/null 2>&1
+service call notification 69 s16 "android.app.INotificationManager" i32 2 i32 0 s16 "shell" >/dev/null 2>&1
+service call notification 69 s16 "android.app.INotificationManager" i32 3 i32 0 s16 "shell" >/dev/null 2>&1
 
-# INotificationManager setInterruptionFilter (filter 2 = NONE)
-for method in 49 50 51 58 59 60; do
-    service call notification $method s16 "android.app.INotificationManager" s16 "android" i32 2 >/dev/null 2>&1
-    service call notification $method s16 "android.app.INotificationManager" s16 "com.android.systemui" i32 2 >/dev/null 2>&1
-done
+# 3) INotificationManager.setInterruptionFilter (2 = None, 3 = Alarms)
+# AOSP Method 47 = Android 8.0 & 8.1
+service call notification 47 s16 "android.app.INotificationManager" s16 "android" i32 2 >/dev/null 2>&1
+service call notification 47 s16 "android.app.INotificationManager" s16 "android" i32 3 >/dev/null 2>&1
+service call notification 47 s16 "android.app.INotificationManager" s16 "com.android.shell" i32 2 >/dev/null 2>&1
+service call notification 47 s16 "android.app.INotificationManager" s16 "com.android.shell" i32 3 >/dev/null 2>&1
+service call notification 47 s16 "android.app.INotificationManager" s16 "com.android.systemui" i32 2 >/dev/null 2>&1
+service call notification 47 s16 "android.app.INotificationManager" s16 "com.android.systemui" i32 3 >/dev/null 2>&1
+
+# 4) Quick Settings DndTile toggle fallback if zen_mode is not yet active
+_CURR_ZEN=$(settings get global zen_mode 2>/dev/null)
+if [ -z "$_CURR_ZEN" ] || [ "$_CURR_ZEN" = "0" ] || [ "$_CURR_ZEN" = "null" ]; then
+    cmd statusbar click-tile dnd >/dev/null 2>&1
+    cmd statusbar click-tile com.android.systemui/.qs.tiles.DndTile >/dev/null 2>&1
+fi
 
 # Database overrides for pure Total Silence
 settings put global zen_mode 2 >/dev/null 2>&1
@@ -508,6 +520,10 @@ V_LOC=$(settings get secure location_mode 2>/dev/null)
 V_DND=$(settings get global zen_mode 2>/dev/null)
 [ -z "$V_DND" ] || [ "$V_DND" = "null" ] && V_DND=$(settings get secure zen_mode 2>/dev/null)
 [ -z "$V_DND" ] || [ "$V_DND" = "null" ] && V_DND=$(settings get system zen_mode 2>/dev/null)
+if [ -z "$V_DND" ] || [ "$V_DND" = "0" ] || [ "$V_DND" = "null" ]; then
+    V_DND_DUMP=$(dumpsys notification 2>/dev/null | grep -iE 'mZenMode=' | head -n 1 | grep -oE '[0-9]+')
+    [ -n "$V_DND_DUMP" ] && [ "$V_DND_DUMP" != "0" ] && V_DND="$V_DND_DUMP"
+fi
 V_BRIGHT=$(settings get system screen_brightness 2>/dev/null)
 V_DARK=$(settings get secure ui_night_mode 2>/dev/null)
 V_ROTATE=$(settings get system accelerometer_rotation 2>/dev/null)
@@ -529,7 +545,7 @@ check_val "Force Resizable" "$V_RESIZE" "1"
 check_val "Freeform Windows" "$V_FREEFORM" "1"
 check_val "Auto Sync" "$V_SYNC" "0"
 check_val "Location Mode" "$V_LOC" "0"
-check_val "Do Not Disturb (Total Silence)" "$V_DND" "2"
+check_val "Do Not Disturb (Total/Alarms)" "$V_DND" "2|3"
 check_val "Screen Brightness" "$V_BRIGHT" "0"
 check_val "Dark Theme" "$V_DARK" "2|yes"
 check_val "Auto Rotate (Sensor)" "$V_ROTATE" "0"
