@@ -188,41 +188,21 @@ done
 cmd notification set_dnd none >/dev/null 2>&1
 cmd notification set_dnd on >/dev/null 2>&1
 
-# Android 8.0 & 8.1 (Oreo) Direct DND Activation
-# 1) Grant Notification Policy Access to Shell
-cmd notification allow_dnd com.android.shell >/dev/null 2>&1
-appops set com.android.shell ACCESS_NOTIFICATIONS allow >/dev/null 2>&1
-settings put secure enabled_notification_policy_access_packages "com.android.shell:android" >/dev/null 2>&1
-service call notification 75 s16 "android.app.INotificationManager" s16 "com.android.shell" i32 1 >/dev/null 2>&1
-
-# 2) INotificationManager.setZenMode (2 = Total Silence, 3 = Alarms Only)
-# AOSP Method 60 = Android 8.0, Method 69 = Android 8.1
-service call notification 60 s16 "android.app.INotificationManager" i32 2 i32 0 s16 "shell" >/dev/null 2>&1
-service call notification 60 s16 "android.app.INotificationManager" i32 3 i32 0 s16 "shell" >/dev/null 2>&1
-service call notification 69 s16 "android.app.INotificationManager" i32 2 i32 0 s16 "shell" >/dev/null 2>&1
-service call notification 69 s16 "android.app.INotificationManager" i32 3 i32 0 s16 "shell" >/dev/null 2>&1
-
-# 3) INotificationManager.setInterruptionFilter (2 = None, 3 = Alarms)
-# AOSP Method 47 = Android 8.0 & 8.1
-service call notification 47 s16 "android.app.INotificationManager" s16 "android" i32 2 >/dev/null 2>&1
-service call notification 47 s16 "android.app.INotificationManager" s16 "android" i32 3 >/dev/null 2>&1
-service call notification 47 s16 "android.app.INotificationManager" s16 "com.android.shell" i32 2 >/dev/null 2>&1
-service call notification 47 s16 "android.app.INotificationManager" s16 "com.android.shell" i32 3 >/dev/null 2>&1
-service call notification 47 s16 "android.app.INotificationManager" s16 "com.android.systemui" i32 2 >/dev/null 2>&1
-service call notification 47 s16 "android.app.INotificationManager" s16 "com.android.systemui" i32 3 >/dev/null 2>&1
-
-# 4) Quick Settings DndTile toggle fallback if zen_mode is not yet active
+# Android 8.0 & 8.1 (Oreo) Quick Settings DND Toggle (Click Once)
 _CURR_ZEN=$(settings get global zen_mode 2>/dev/null)
-if [ -z "$_CURR_ZEN" ] || [ "$_CURR_ZEN" = "0" ] || [ "$_CURR_ZEN" = "null" ]; then
-    cmd statusbar click-tile dnd >/dev/null 2>&1
-    cmd statusbar click-tile com.android.systemui/.qs.tiles.DndTile >/dev/null 2>&1
+[ -z "$_CURR_ZEN" ] || [ "$_CURR_ZEN" = "null" ] && _CURR_ZEN=$(dumpsys notification 2>/dev/null | grep -iE 'mZenMode=' | head -n 1 | grep -oE '[0-9]+')
+if [ -z "$_CURR_ZEN" ] || [ "$_CURR_ZEN" = "0" ]; then
+    cmd statusbar click-tile dnd >/dev/null 2>&1 || cmd statusbar click-tile com.android.systemui/.qs.tiles.DndTile >/dev/null 2>&1
 fi
 
-# Database overrides for pure Total Silence
-settings put global zen_mode 2 >/dev/null 2>&1
-content insert --uri content://settings/global --bind name:s:zen_mode --bind value:i:2 >/dev/null 2>&1
-settings put secure zen_mode 2 >/dev/null 2>&1
-settings put system zen_mode 2 >/dev/null 2>&1
+# Database overrides fallback (only if not already active)
+_CHECK_ZEN=$(settings get global zen_mode 2>/dev/null)
+if [ "$_CHECK_ZEN" != "2" ] && [ "$_CHECK_ZEN" != "3" ]; then
+    settings put global zen_mode 2 >/dev/null 2>&1
+    content insert --uri content://settings/global --bind name:s:zen_mode --bind value:i:2 >/dev/null 2>&1
+    settings put secure zen_mode 2 >/dev/null 2>&1
+    settings put system zen_mode 2 >/dev/null 2>&1
+fi
 settings put global zen_mode_ringer_level 0 >/dev/null 2>&1
 settings put global mode_ringer 0 >/dev/null 2>&1
 content insert --uri content://settings/global --bind name:s:mode_ringer --bind value:i:0 >/dev/null 2>&1
