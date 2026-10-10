@@ -371,7 +371,7 @@ pm enable com.android.ext.services >/dev/null 2>&1
 is_whitelisted_pkg() {
     _p="$1"
     case "$_p" in
-        *webview*|*WebView*|*gboard*|*Gboard*|*latin*|*Latin*|*ext.services*|*ext.shared*|*ExtServices*|*textclassifier*|*gms*|*gsf*)
+        *webview*|*WebView*|*gboard*|*Gboard*|*latin*|*Latin*|*ext.services*|*ext.shared*|*ExtServices*|*textclassifier*|*gms*|*gsf*|*android.as*)
             return 0
             ;;
         *ldmnq*|*ldplayer*|*microvirt*|*bignox*|*nox*|*mumu*|*nemu*|*bluestacks*|*flysilkworm*|*keyboard*|*Keyboard*|*inputmethod*|*ime*|*IME*)
