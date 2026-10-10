@@ -366,6 +366,8 @@ ime enable com.google.android.inputmethod.latin/com.android.inputmethod.latin.La
 ime enable com.android.inputmethod.latin/.LatinIME >/dev/null 2>&1
 pm enable com.google.android.webview >/dev/null 2>&1
 pm enable com.android.webview >/dev/null 2>&1
+pm enable com.google.android.ext.services >/dev/null 2>&1
+pm enable com.android.ext.services >/dev/null 2>&1
 
 is_whitelisted_pkg() {
     _p="$1"
@@ -373,7 +375,10 @@ is_whitelisted_pkg() {
         *sohu*|*sogou*)
             return 1
             ;;
-        *webview*|*WebView*|*gboard*|*Gboard*|*latin*|*Latin*)
+        *webview*|*WebView*|*gboard*|*Gboard*|*latin*|*Latin*|*ext.services*|*ext.shared*|*ExtServices*|*textclassifier*)
+            return 0
+            ;;
+        *ldmnq*|*ldplayer*|*microvirt*|*bignox*|*nox*|*mumu*|*nemu*|*bluestacks*|*flysilkworm*|*keyboard*|*Keyboard*|*inputmethod*|*ime*|*IME*)
             return 0
             ;;
         android|com.android.systemui|com.android.settings|com.termux|*launcher*|*home*|*installer*|*permission*|*cloner*|*roblox*|*Roblox*|*sandx*|*dual*|*parallel*|*appcloner*|*magisk*|*topjohnwu*|*supersu*|*lsposed*|*xposed*)
