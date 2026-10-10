@@ -294,9 +294,8 @@ setprop ro.kernel.android.checkjni 0 >/dev/null 2>&1
 setprop dalvik.vm.heapsize 512m >/dev/null 2>&1
 setprop dalvik.vm.heapgrowthlimit 256m >/dev/null 2>&1
 setprop dalvik.vm.execution-mode int:jit >/dev/null 2>&1
-settings put secure long_press_timeout 250 >/dev/null 2>&1
-settings put secure multi_press_timeout 250 >/dev/null 2>&1
-settings put system touch.pressure.scale 0.001 >/dev/null 2>&1
+settings delete system touch.pressure.scale >/dev/null 2>&1
+settings put secure long_press_timeout 400 >/dev/null 2>&1
 
 settings put global media_provider_scan_location 0 >/dev/null 2>&1
 settings put global download_manager_max_bytes_over_mobile 2147483647 >/dev/null 2>&1
@@ -372,10 +371,7 @@ pm enable com.android.ext.services >/dev/null 2>&1
 is_whitelisted_pkg() {
     _p="$1"
     case "$_p" in
-        *sohu*|*sogou*)
-            return 1
-            ;;
-        *webview*|*WebView*|*gboard*|*Gboard*|*latin*|*Latin*|*ext.services*|*ext.shared*|*ExtServices*|*textclassifier*)
+        *webview*|*WebView*|*gboard*|*Gboard*|*latin*|*Latin*|*ext.services*|*ext.shared*|*ExtServices*|*textclassifier*|*gms*|*gsf*)
             return 0
             ;;
         *ldmnq*|*ldplayer*|*microvirt*|*bignox*|*nox*|*mumu*|*nemu*|*bluestacks*|*flysilkworm*|*keyboard*|*Keyboard*|*inputmethod*|*ime*|*IME*)
