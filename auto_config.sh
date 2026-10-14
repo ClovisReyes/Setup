@@ -110,50 +110,6 @@ while true; do
     fi
 done
 
-USER_ROT=""
-TARGET_ROT=0
-ROT_NAME="Vertical"
-while true; do
-    printf "${CYAN}[?]${NC} Select Screen Orientation (v = Vertical, h = Horizontal): "
-    if [ -e /dev/tty ]; then
-        if ! read -r USER_ROT < /dev/tty; then
-            echo ""
-            log_error "Terminal input disconnected. Exiting."
-            exit 1
-        fi
-    else
-        if ! read -r USER_ROT; then
-            echo ""
-            log_error "Terminal does not support interactive input (Non-TTY mode). Script aborted!"
-            exit 1
-        fi
-    fi
-    USER_ROT=$(echo "$USER_ROT" | tr -d '\r' | tr -d ' ')
-
-    if [ -z "$USER_ROT" ]; then
-        log_error "Input cannot be empty! Please enter 'v' or 'h'."
-        continue
-    fi
-
-    case "$USER_ROT" in
-        [vV]|[vV][eE][rR][tT][iI][kK][aA][lL]|[vV][eE][rR][tT][iI][cC][aA][lL])
-            TARGET_ROT=0
-            ROT_NAME="Vertical"
-            log_status "Locking orientation to Vertical (0°)"
-            break
-            ;;
-        [hH]|[hH][oO][rR][iI][zZ][oO][nN][tT][aA][lL])
-            TARGET_ROT=1
-            ROT_NAME="Horizontal"
-            log_status "Locking orientation to Horizontal (90°)"
-            break
-            ;;
-        *)
-            log_error "Invalid input! Please enter 'v' for Vertical or 'h' for Horizontal."
-            ;;
-    esac
-done
-
 settings put global force_resizable_activities 1 >/dev/null 2>&1
 setprop persist.sys.debug.force_resizable 1 >/dev/null 2>&1
 settings put global enable_freeform_support 1 >/dev/null 2>&1
@@ -224,32 +180,6 @@ settings put system screen_brightness_mode 0 >/dev/null 2>&1
 settings put system screen_brightness 0 >/dev/null 2>&1
 cmd uimode night yes >/dev/null 2>&1
 settings put secure ui_night_mode 2 >/dev/null 2>&1
-
-# Disable auto-rotation (sensor) & lock orientation (Android 8 - 15)
-settings put system accelerometer_rotation 0 >/dev/null 2>&1
-settings put secure accelerometer_rotation 0 >/dev/null 2>&1
-settings put global accelerometer_rotation 0 >/dev/null 2>&1
-content insert --uri content://settings/system --bind name:s:accelerometer_rotation --bind value:i:0 >/dev/null 2>&1
-
-settings put system user_rotation "$TARGET_ROT" >/dev/null 2>&1
-settings put secure user_rotation "$TARGET_ROT" >/dev/null 2>&1
-settings put global user_rotation "$TARGET_ROT" >/dev/null 2>&1
-content insert --uri content://settings/system --bind name:s:user_rotation --bind value:i:"$TARGET_ROT" >/dev/null 2>&1
-
-wm user-rotation lock "$TARGET_ROT" >/dev/null 2>&1
-cmd window set-user-rotation lock "$TARGET_ROT" >/dev/null 2>&1
-settings put system lockscreen_rotation 0 >/dev/null 2>&1
-
-# Lock home screen rotation (Launcher-specific, Android 8-15)
-settings put secure show_rotation_suggestions 0 >/dev/null 2>&1
-settings put system launcher_rotation 0 >/dev/null 2>&1
-settings put secure launcher_rotation 0 >/dev/null 2>&1
-for _lprov in com.android.launcher3.settings com.google.android.apps.nexuslauncher.settings com.sec.android.app.launcher.settings; do
-    content update --uri content://$_lprov/favorites --bind _key:s:pref_allowRotation --bind _value:s:false >/dev/null 2>&1
-    content insert --uri content://$_lprov/favorites --bind _key:s:pref_allowRotation --bind _value:s:false >/dev/null 2>&1
-    content update --uri content://$_lprov/favorites --bind _key:s:allow_rotation --bind _value:s:false >/dev/null 2>&1
-    content insert --uri content://$_lprov/favorites --bind _key:s:allow_rotation --bind _value:s:false >/dev/null 2>&1
-done
 
 settings put global private_dns_mode hostname >/dev/null 2>&1
 settings put global private_dns_specifier 1dot1dot1dot1.cloudflare-dns.com >/dev/null 2>&1
@@ -514,9 +444,6 @@ if [ -z "$V_DND" ] || [ "$V_DND" = "0" ] || [ "$V_DND" = "null" ]; then
 fi
 V_BRIGHT=$(settings get system screen_brightness 2>/dev/null)
 V_DARK=$(settings get secure ui_night_mode 2>/dev/null)
-V_ROTATE=$(settings get system accelerometer_rotation 2>/dev/null)
-V_USER_ROT=$(settings get system user_rotation 2>/dev/null)
-[ -z "$V_USER_ROT" ] || [ "$V_USER_ROT" = "null" ] && V_USER_ROT=$(settings get global user_rotation 2>/dev/null)
 V_DNS_SPEC=$(settings get global private_dns_specifier 2>/dev/null)
 V_WIFI_SCAN=$(settings get global wifi_scan_always_enabled 2>/dev/null)
 V_BT_ON=$(settings get global bluetooth_on 2>/dev/null)
@@ -536,8 +463,6 @@ check_val "Location Mode" "$V_LOC" "0"
 check_val "Do Not Disturb (Total Silence)" "$V_DND" "2"
 check_val "Screen Brightness" "$V_BRIGHT" "0"
 check_val "Dark Theme" "$V_DARK" "2|yes"
-check_val "Auto Rotate (Sensor)" "$V_ROTATE" "0"
-check_val "Orientation Lock" "${ROT_NAME:-Vertical} (${V_USER_ROT:-$TARGET_ROT})" "Vertical|Horizontal|[0-1]"
 check_val "Private DNS" "$V_DNS_SPEC" "cloudflare"
 check_val "Wi-Fi Location Scan" "$V_WIFI_SCAN" "0"
 check_val "Bluetooth" "$V_BT_ON" "0"
